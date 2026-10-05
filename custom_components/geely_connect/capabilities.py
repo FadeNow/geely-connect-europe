@@ -90,6 +90,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
       sunroof.enabled, sunshade.enabled, windows.enabled
       find_car.enabled
       charging.enabled, parking_comfort.enabled
+      scheduled_charging.enabled, scheduled_trip.enabled
       raw_count (int)
     """
     out: dict[str, Any] = {"raw_count": len(items)}
@@ -265,5 +266,14 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["scheduled_charging.enabled"] = False
     elif enabled("remote_appointment_charging"):
         out["scheduled_charging.enabled"] = True
+    # The scheduled trip, by the same rule. set_scheduled_trip sends the body
+    # an EX5 owner captured (#4), and an EX5 declares the feature as
+    # `booking_travel_2`. The E2s carry `booking_travel_1`, whose slot 4
+    # answers in another shape ({bw: "false", timerId: "0"}), so the EX5 body
+    # is not theirs to receive.
+    if enabled("booking_travel_2"):
+        out["scheduled_trip.enabled"] = True
+    elif "booking_travel_1" in by_id:
+        out["scheduled_trip.enabled"] = False
 
     return out

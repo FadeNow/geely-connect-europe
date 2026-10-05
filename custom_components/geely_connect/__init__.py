@@ -1034,6 +1034,15 @@ def _register_debug_service(hass: HomeAssistant) -> None:
         api = bundle["api"]
         command = call.data.get("command", "start")
         departure = call.data.get("departure")
+        # The body below is an EX5's, whose catalogue declares the trip as
+        # `booking_travel_2`. An E2 declares `booking_travel_1` instead, and
+        # its slot 4 answers {bw: "false", timerId: "0"} - another shape, and a
+        # request nobody has captured (#72). Sending it the EX5 body would fill
+        # the blanks with defaults and switch Cabin Comfort on unasked.
+        if (bundle.get("capabilities") or {}).get("scheduled_trip.enabled") is False:
+            raise ServiceValidationError(
+                "this car declares its scheduled trip in the 1.0 scheme, whose "
+                "request has not been captured; nothing was sent")
         try:
             resp = await hass.async_add_executor_job(api.charge_server_get, "4")
         except NotImplementedError as e:
@@ -1041,10 +1050,19 @@ def _register_debug_service(hass: HomeAssistant) -> None:
                 f"the scheduled trip is not mapped on this platform yet: {e}") from e
         except Exception as e:  # noqa: BLE001 - the read decides, so it must be seen
             raise HomeAssistantError(f"could not read the current scheduled trip: {e}") from e
+        # A read the gateway refused is not an empty schedule: with a
+        # departure given, an empty one would send the captured defaults.
+        code = resp.get("code") if isinstance(resp, dict) else None
+        if code is not None and str(code) != "1000":
+            raise HomeAssistantError(
+                f"could not read the current scheduled trip: {redact(resp)}")
         current = resp.get("data") if isinstance(resp, dict) else None
         current = current if isinstance(current, dict) else {}
         if departure is not None:
-            scheduled_ms = str(int(dt_util.as_timestamp(departure) * 1000))
+            # The selector hands over a naive time, meant in Home Assistant's
+            # zone; as_utc reads it so, where a bare timestamp() would read it
+            # in the OS zone - UTC in a Docker install without TZ, hours off.
+            scheduled_ms = str(int(dt_util.as_utc(departure).timestamp() * 1000))
         else:
             scheduled_ms = str(current.get("scheduledTime") or "")
         if not scheduled_ms:

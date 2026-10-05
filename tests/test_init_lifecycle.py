@@ -822,16 +822,27 @@ def test_scheduled_trip_stop_sends_back_what_the_car_holds():
 
 
 def test_scheduled_trip_start_with_a_departure_sends_it_in_ha_time():
+    """The selector hands over a naive 07:00 meant in Home Assistant's zone.
+    Read in the OS zone instead - UTC in a Docker install without TZ - it went
+    out hours off. Pinned against a zone that is neither UTC nor this
+    machine's, with the expected instant written out rather than computed by
+    the code under test."""
     m = _mod()
     api = _FakeApi()
     dt_util = load("__init__").dt_util
-    from datetime import datetime
-    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
-                      {"command": "start", "departure": datetime(2026, 10, 2, 7, 0)},
-                      name="set_scheduled_trip")
-    run()
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    before = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(ZoneInfo("Africa/Johannesburg"))   # UTC+2, no DST
+    try:
+        _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                          {"command": "start", "departure": datetime(2026, 10, 2, 7, 0)},
+                          name="set_scheduled_trip")
+        run()
+    finally:
+        dt_util.set_default_time_zone(before)
     (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
-    want = str(int(dt_util.as_timestamp(datetime(2026, 10, 2, 7, 0)) * 1000))
+    want = str(int(datetime(2026, 10, 2, 5, 0, tzinfo=timezone.utc).timestamp() * 1000))
     assert kw["scheduled_time_ms"] == want, (kw, want)
     assert kw["command"] == "start"
     # The rest of the schedule travels as the car holds it, not as defaults.
@@ -903,6 +914,47 @@ def test_scheduled_trip_surfaces_a_failed_read_and_an_unmapped_platform():
     else:
         raise AssertionError("a non-dict read was not treated as empty")
     api.charge_server_get = orig
+
+
+def test_scheduled_trip_refuses_a_car_that_speaks_the_1_0_scheme():
+    """An E2 declares the trip as `booking_travel_1` and answers slot 4 in its
+    own shape; the EX5 body would reach it with defaults filled in. Refused
+    before anything goes out - not even the read."""
+    m = _mod()
+    from datetime import datetime
+    from homeassistant.exceptions import ServiceValidationError
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api,
+                                 "capabilities": {"scheduled_trip.enabled": False}}},
+                      {"command": "start", "departure": datetime(2026, 10, 2, 7, 0)},
+                      name="set_scheduled_trip")
+    try:
+        run()
+    except ServiceValidationError as e:
+        assert "1.0 scheme" in str(e)
+    else:
+        raise AssertionError("a 1.0-scheme car was sent the EX5 body")
+    assert api.calls == [], api.calls
+
+
+def test_scheduled_trip_treats_a_refused_read_as_a_failure_not_an_empty_slot():
+    """A read the gateway answers with an error code carries no schedule, and
+    with a departure given an empty schedule would send the defaults."""
+    m = _mod()
+    from datetime import datetime
+    from homeassistant.exceptions import HomeAssistantError
+    api = _FakeApi()
+    api.charge_server_get = lambda biz: {"code": "8070", "message": "busy"}
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "start", "departure": datetime(2026, 10, 2, 7, 0)},
+                      name="set_scheduled_trip")
+    try:
+        run()
+    except HomeAssistantError as e:
+        assert "could not read" in str(e) and "8070" in str(e)
+    else:
+        raise AssertionError("a refused read was taken for an empty schedule")
+    assert not [c for c in api.calls if isinstance(c, tuple)], "nothing may be sent"
 
 
 def test_scheduled_trip_reads_the_car_back_afterwards():

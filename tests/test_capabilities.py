@@ -315,3 +315,15 @@ def test_a_1_0_catalogue_gets_no_parking_comfort_switch():
     out = cap.parse([_entry("honk_flash", True)])
     assert "parking_comfort.enabled" not in out
     assert cap._speaks_1_0({"honk_flash": {}}) is False
+
+
+def test_the_scheduled_trip_is_the_ex5s_only_where_the_catalogue_says_2_0():
+    """set_scheduled_trip sends the body an EX5 owner captured (#4), and an
+    EX5 declares the feature as `booking_travel_2`. An E2 declares
+    `booking_travel_1` and answers slot 4 in another shape (#72), so the
+    service must refuse it rather than fill the blanks with defaults."""
+    assert cap.parse([_entry("booking_travel_2", True)])["scheduled_trip.enabled"] is True
+    assert cap.parse([_entry("booking_travel_1", True)])["scheduled_trip.enabled"] is False
+    both = cap.parse([_entry("booking_travel_1", True), _entry("booking_travel_2", True)])
+    assert both["scheduled_trip.enabled"] is True
+    assert "scheduled_trip.enabled" not in cap.parse([_entry("honk_flash", True)])
