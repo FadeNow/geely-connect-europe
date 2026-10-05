@@ -1919,6 +1919,140 @@ def test_without_a_car_image_the_drawn_car_is_kept():
     assert got["noPhoto"] is True, got
 
 
+# Issue #85: a car photo has to carry the same live state as the drawing.
+# A 760x300 transparent SVG: the photo box then has the drawing's proportions,
+# and nothing has to be fetched.
+_PHOTO = ("data:image/svg+xml," +
+          "%3Csvg xmlns='http://www.w3.org/2000/svg' width='760' height='300'%3E%3C/svg%3E")
+
+_PHOTO_SCRIPT = r"""async (arg) => {
+    const el = document.createElement("geely-card");
+    el.style.display = "block"; el.style.width = "470px";
+    document.body.appendChild(el);
+    el.setConfig(arg.cfg);
+    const hass = window.mkHass({});
+    const put = (id, state, attrs = {}) =>
+        { hass.states[id] = { entity_id: id, state, attributes: attrs }; };
+    if (arg.charging) put("sensor.car_charger_connection", "Charging");
+    if (arg.brake) put("binary_sensor.car_park_brake_engaged", arg.brake);
+    el.hass = hass;
+    const r = el.shadowRoot, cs = (n) => n ? getComputedStyle(n) : null;
+    const q = (s) => r.querySelector(s);
+    // The photo box takes its height from the image, so measure after it loads.
+    const pimg = q(".photo img");
+    if (pimg) await pimg.decode().catch(() => {});
+    const out = {};
+    if (q("svg.car")) {
+        out.dotAnim = cs(q(".car .portdot")).animationName;
+        out.glow = cs(q(".car .glow")).fill;
+    }
+    if (q(".photo")) {
+        const port = q(".photo .lamp.port");
+        out.portAnim = cs(port).animationName;
+        out.portOpacity = cs(port).opacity;
+        const sh = q(".photo .ground.shadow"), gl = q(".photo .ground.glow");
+        out.shadow = sh ? cs(sh).backgroundColor : null;
+        out.glowBg = gl ? cs(gl).backgroundColor : null;
+        // The ground must sit behind the car, not over it.
+        const img = q(".photo img"), b = img.getBoundingClientRect();
+        const hit = r.elementFromPoint(b.left + b.width / 2, b.bottom - 2);
+        out.onTopAtTyres = hit ? hit.tagName + "." + (hit.className || "") : null;
+        out.imgHeight = b.height;
+        // Lamps carry their key as a class; the amber markers do not, and are
+        // emitted in CAR_PHOTO's order: hood, front, rear, trunk.
+        out.spots = Object.fromEntries([...r.querySelectorAll(".photo .lamp")]
+            .map((n) => [n.className.replace(/\b(lamp|on)\b/g, "").trim(), n.style.left]));
+        ["hood", "front", "rear", "trunk"].forEach((k, i) => {
+            const n = r.querySelectorAll(".photo .pind")[i];
+            if (n) out.spots[k] = n.style.left;
+        });
+    }
+    el.remove();
+    return out;
+}"""
+
+
+def _photo(cfg=None, **state):
+    return _evaluate(_PHOTO_SCRIPT,
+                       arg={"cfg": {"car_image": _PHOTO, **(cfg or {})}, **state})
+
+
+def _drawn(**state):
+    return _evaluate(_PHOTO_SCRIPT, arg={"cfg": {}, **state})
+
+
+def test_a_car_photo_lights_the_charge_port_as_steadily_as_the_drawing():
+    """#85: the drawn port dot is a steady light while charging; the photo's
+    throbbed on a 1.9 s loop, so the same car read differently by card art.
+    Asserted against the drawing in the same test, so it is parity and not a
+    pinned value."""
+    drawn, photo = _drawn(charging=True), _photo(charging=True)
+    assert drawn["dotAnim"] == "none", drawn
+    assert photo["portAnim"] == drawn["dotAnim"], (photo, drawn)
+    assert photo["portOpacity"] == "1", photo
+
+
+def test_a_car_photo_keeps_the_drawings_ground_shadow_and_charge_glow():
+    """#85: the drawing stands on a shadow that turns the accent colour while
+    charging; the photo had neither. Both now sit behind the image - the
+    element at the tyre line is still the photo, not the shadow."""
+    idle, charging = _photo(), _photo(charging=True)
+    assert idle["shadow"] not in (None, "rgba(0, 0, 0, 0)"), idle
+    assert idle["glowBg"] == "rgba(0, 0, 0, 0)", idle
+    assert charging["glowBg"] not in (None, "rgba(0, 0, 0, 0)"), charging
+    assert charging["glowBg"] != idle["glowBg"], (charging, idle)
+    assert (charging["onTopAtTyres"] or "").startswith("IMG"), charging
+    # and the drawing itself is unchanged: glow transparent idle, lit charging
+    assert _drawn()["glow"] == "rgba(0, 0, 0, 0)"
+    assert _drawn(charging=True)["glow"] != "rgba(0, 0, 0, 0)"
+
+
+def test_a_right_facing_car_photo_mirrors_the_default_lamp_spots():
+    """#85: the default spots were measured on a car facing LEFT. On an image
+    facing right - the way the drawing faces - the park-brake ember of the
+    tail lamp landed on the headlights and bonnet. `car_image_facing: right`
+    mirrors the defaults; spots the owner measured on their own image are
+    theirs, and are not mirrored."""
+    left = _photo(brake="on")["spots"]
+    assert left["taillight"] == "94.3%" and left["headlight"] == "8.5%", left
+    right = _photo({"car_image_facing": "right"}, brake="on")["spots"]
+    assert right["taillight"] == "5.7%", right
+    assert right["headlight"] == "91.5%", right
+    assert right["port"] == "13.8%", right
+    assert right["hood"] == "85%" and right["trunk"] == "9%", right
+    own = _photo({"car_image_facing": "right",
+                  "car_image_hotspots": {"taillight": [7, 40]}})["spots"]
+    assert own["taillight"] == "7%", own
+
+
+def test_the_photo_only_states_are_watched_when_a_photo_is_shown():
+    """_carBody reads the plug and the park brake for the photo overlay only;
+    a state the card draws but does not watch freezes on screen, because the
+    render is skipped while the signature is unchanged."""
+    got = _evaluate(r"""() => {
+        const out = {};
+        for (const [tag, cfg] of [["geely-card", {car_image: "x.webp"}],
+                                  ["geely-card-compact", {car_image: "x.webp"}],
+                                  ["geely-card", {}]]) {
+            const el = document.createElement(tag);
+            document.body.appendChild(el);
+            el.setConfig(cfg);
+            const hass = window.mkHass({});
+            hass.states["binary_sensor.car_park_brake_engaged"] =
+                { entity_id: "binary_sensor.car_park_brake_engaged", state: "on", attributes: {} };
+            el.hass = hass;
+            const before = el._signature(hass);
+            hass.states["binary_sensor.car_park_brake_engaged"].state = "off";
+            out[tag + (cfg.car_image ? "+photo" : "")] = before !== el._signature(hass);
+            el.remove();
+        }
+        return out;
+    }""")
+    assert got["geely-card+photo"] is True, got
+    assert got["geely-card-compact+photo"] is True, got
+    assert got["geely-card"] is False, got   # a drawn card keeps its signature
+
+
 def test_the_summary_card_makes_the_car_a_button_that_opens_the_full_card():
     """Tapping the car on the compact card opens the full card in a modal
     appended to document.body (so it centres against the viewport, not a

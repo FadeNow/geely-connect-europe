@@ -306,9 +306,10 @@ Everything else is optional:
 | `charge_time_format:` | `min` | How **Time to full** reads while charging: `min` (e.g. `249 min`) or `hm` for hours + minutes (e.g. `4h 9m`) |
 | `show_parked:` | `false` | Compact card only. `true` adds a **Parked** chip next to Locked while the car is stationary, matching the full card's status |
 | `charging_countdown:` | `false` | Compact card only. `true` moves the live charging power up to a **status line under the title** (as the full card shows it) and turns the charging chip into a **ready-by time + countdown** (e.g. `Ready 10:22 · 2h 15m left`) that ticks down each minute |
-| `buttons:` | strip `[lock, heat, cool, trunk, find]`, mini `[lock, heat, cool]` | Strip and mini cards. Which icon buttons to draw, in this order: any of **`lock`** (follows the car - Lock or Unlock), **`heat`**, **`cool`**, **`trunk`**, **`find`**, **`charging`** (Stop / Start charging, only on a car that has the Charging switch), **`climate`**, **`refresh`**. A name the car has no entity for is skipped rather than drawn dead. `buttons: [lock, charging]` is the morning strip from [#83](https://github.com/YossiKon/geely-connect/issues/83) |
-| `car_image:` | *none* | Path or URL to your own photo of the car (e.g. `/local/geely/mycar.png` for a file in `config/www/geely/`). It replaces the drawn car while keeping the live overlay - headlights, tail lights, charge port and the open-panel markers. Transparent PNG/WebP, side-on, front to the left works best |
-| `car_image_hotspots:` | *sensible defaults* | Fine-tune where the overlay lights sit on your image, as percentages, if a different crop needs it - e.g. `{headlight: [8, 46], taillight: [94, 37], port: [86, 40]}` |
+| `buttons:` | strip `[lock, heat, cool, trunk, find]`, mini `[lock, heat, cool]` | Strip and mini cards. Which icon buttons to draw, in this order: any of **`lock`** (follows the car - Lock or Unlock), **`heat`**, **`cool`**, **`trunk`**, **`find`**, **`charging`** (Stop / Start charging, only on a car that has the Charging switch), **`climate`**, **`refresh`**. `charging` and `climate` are skipped on a car that has no such entity, rather than drawn dead; an unknown name is skipped too. `buttons: [lock, charging]` is the morning strip from [#83](https://github.com/YossiKon/geely-connect/issues/83) |
+| `car_image:` | *none* | Path or URL to your own photo of the car (e.g. `/local/geely/mycar.png` for a file in `config/www/geely/`). It replaces the drawn car while keeping the live overlay - headlights, tail lights, charge port and the open-panel markers. Transparent PNG/WebP, side-on, cropped at the tyres. It stands on the same shadow as the drawing, tinted while charging |
+| `car_image_facing:` | `left` | Which way the car in your image points. The overlay positions are measured on a car facing left; set `right` for an image facing the other way (as the drawn car does) and they are mirrored to match. Positions you set in `car_image_hotspots` are used as given |
+| `car_image_hotspots:` | *sensible defaults* | Fine-tune where the overlay lights sit on your image, as percentages, if a different crop needs it - e.g. `{headlight: [8, 46], taillight: [94, 37], port: [86, 40]}`. `ground` (default `[50, 100]`, the bottom edge) is where the shadow sits |
 
 ```yaml
 type: custom:geely-card
@@ -327,6 +328,7 @@ can still reach every control.
 ```yaml
 type: custom:geely-card-compact
 car_image: /local/geely/mycar.webp   # your photo in config/www/geely/
+car_image_facing: right              # only if your car points to the right
 ```
 
 #### The climate panel

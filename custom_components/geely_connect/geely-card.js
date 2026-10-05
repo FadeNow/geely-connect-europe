@@ -504,6 +504,11 @@
     "sensor.combined_range",
   ];
 
+  /* Read by _carBody for the photo overlay only, so watched only when a
+   * photo is shown - a drawn card keeps its existing signature. */
+  const PHOTO_WATCHED = ["binary_sensor.charger_plug",
+    "binary_sensor.is_plugged_in", "binary_sensor.park_brake_engaged"];
+
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
   const ON_TEXT = `color-mix(in srgb, ${ACCENT} 76%, var(--primary-text-color, #1c1c1e))`;
@@ -633,18 +638,28 @@
    * one set of positions fits any side profile of roughly the same crop.
    *
    * Measured against a manufacturer side render, front at the LEFT, which is
-   * how these are almost always shot. `car_image_hotspots` overrides any of
-   * them for an image framed differently. */
+   * how these are almost always shot. `car_image_facing: right` mirrors them
+   * for an image of a car facing the other way - the way the drawing faces -
+   * and `car_image_hotspots` overrides any of them for an image framed
+   * differently. `ground` is where the drawing's shadow and charge glow sit:
+   * the bottom edge, because a transparent cut-out is cropped at the tyres. */
   const PHOTO_SPOTS = {
     // Measured off the lamps themselves rather than judged by eye: the tail
     // lamp from its red pixels, the headlight from the dark lens, the charge
     // flap from the two vertical edges of its outline in the quarter panel.
     headlight: [8.5, 45.5], taillight: [94.3, 37.3], port: [86.2, 39.5],
     hood: [15, 38], front: [50, 37], rear: [75, 37], trunk: [91, 24],
+    ground: [50, 100],
   };
 
   const CAR_PHOTO = (cls, open, cfg, lamps) => {
-    const S = Object.assign({}, PHOTO_SPOTS, cfg.car_image_hotspots || {});
+    const right = String(cfg.car_image_facing || "").toLowerCase() === "right";
+    const base = {};
+    for (const k in PHOTO_SPOTS) {
+      const [x, y] = PHOTO_SPOTS[k];
+      base[k] = [right ? Math.round((100 - x) * 10) / 10 : x, y];
+    }
+    const S = Object.assign(base, cfg.car_image_hotspots || {});
     const at = (k) => `left:${S[k][0]}%; top:${S[k][1]}%`;
     const lamp = (k, on) =>
       `<i class="lamp ${k}${on ? " on" : ""}" style="${at(k)}"></i>`;
@@ -652,6 +667,8 @@
       `<i class="pind${open[k] ? " on" : ""}" style="${at(k)}"></i>`;
     return `
       <div class="photo ${cls}">
+        <i class="ground shadow" style="${at("ground")}"></i>
+        <i class="ground glow" style="${at("ground")}"></i>
         <img src="${esc(cfg.car_image)}" alt="">
         <span class="lamps">
           ${lamp("headlight", lamps.head)}${lamp("taillight", lamps.tail)}
@@ -878,11 +895,22 @@
     .carwrap.expandable:hover { transform: translateY(-1px); filter: brightness(1.06); }
     .carwrap.expandable:focus-visible { box-shadow: 0 0 0 2px ${ACCENT}; }
     /* the photo variant - see CAR_PHOTO */
-    .photo { position: relative; width: 100%; line-height: 0; }
+    /* isolation: the ground shadow sits at z-index -1, behind the image but
+     * still inside this box. The bottom margin is the room the drawing keeps
+     * under its tyres for the same shadow. */
+    .photo { position: relative; width: 100%; line-height: 0; isolation: isolate;
+      margin-bottom: 3%; }
     .photo img { width: 100%; height: auto; display: block; }
     /* A wrong path must not leave lamps floating over a broken-image glyph. */
     .photo.broken img { visibility: hidden; }
-    .photo.broken .lamps { display: none; }
+    .photo.broken .lamps, .photo.broken .ground { display: none; }
+    /* CAR_SVG's .shadow and .glow ellipses, in the photo's proportions. */
+    .photo .ground { position: absolute; z-index: -1; border-radius: 50%;
+      transform: translate(-50%,-50%); filter: blur(5px); }
+    .photo .ground.shadow { width: 84%; height: 7%; background: rgba(0,0,0,.28); }
+    .photo .ground.glow { width: 79%; height: 6%; background: transparent; }
+    .photo.charging .ground.glow {
+      background: color-mix(in srgb, ${ACCENT} 38%, transparent); }
     .photo .lamps { position: absolute; inset: 0; pointer-events: none; }
     .photo .lamp, .photo .pind {
       position: absolute; transform: translate(-50%,-50%); border-radius: 50%;
@@ -901,15 +929,11 @@
     .photo.plugged .lamp.port { opacity: .4; }
     .photo.braked .lamp.taillight { opacity: .38; }
     .photo .lamp.taillight.on { opacity: 1; }
-    .photo.charging .lamp.port { opacity: 1; animation: geely-throb 1.9s ease-in-out infinite; }
+    .photo.charging .lamp.port { opacity: 1; }
     .photo .pind { width: 13px; height: 13px; background: ${AMBER};
       opacity: 0; transition: opacity .3s ease;
       box-shadow: 0 0 9px 2px ${AMBER}; }
     .photo .pind.on { opacity: 1; animation: geely-blink 1.4s ease infinite; }
-    @keyframes geely-throb {
-      0%,100% { opacity: 1; filter: blur(1.5px); }
-      50%     { opacity: .45; filter: blur(3px); }
-    }
     .car .shadow { fill: rgba(0,0,0,.28); }
     .car .glow { fill: transparent; transition: fill .5s ease; }
     .car .paint { fill: var(--geely-car-paint, url(#gp)); stroke: rgba(0,0,0,.18); stroke-width: 1.5; }
@@ -1373,7 +1397,8 @@
       // so a card that forgot to watch these would freeze its banner on screen
       // - exactly how the door count and the charging label froze before. One
       // rule here cannot be forgotten by the sixth card.
-      return [...new Set(this._watched().concat(ALWAYS_WATCHED))]
+      return [...new Set(this._watched().concat(ALWAYS_WATCHED,
+        this._config.car_image ? PHOTO_WATCHED : []))]
         .map((e) => {
           const st = this._st(e);
           if (!st) return "-";
@@ -2008,8 +2033,10 @@
     /* The car drawing, or the owner's own photo of it when `car_image` is set.
      * The drawing carries live state, so the photo has to as well: headlamps
      * while the car is moving, tail lamps while it is moving or held on the
-     * park brake, and the charge port lit from the same states that drive the
-     * drawing's port dot. */
+     * park brake, and the charge port lit steadily while charging, as the
+     * drawing's port dot is, with a dim glow while merely plugged in. The
+     * ground shadow under it turns the accent colour while charging, as the
+     * drawing's does (#85). */
     _carBody(cls) {
       const open = this._openMap();
       if (!this._config.car_image) return CAR_SVG(cls, open);
