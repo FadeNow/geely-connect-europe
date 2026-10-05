@@ -732,9 +732,8 @@ def test_every_panel_that_opens_says_closed_rather_than_off():
     class, and it read "Off" in a row of doors reading "Closed" (#40).
 
     Deliberately a rule over all of them rather than a check of the one that
-    was wrong, because the next panel added would land in the same trap - the
-    seatbelt is excluded because it is not an opening and On/Off is honest
-    for it."""
+    was wrong, because the next panel added would land in the same trap. The
+    seatbelt is not an opening; it has its own class, checked below."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     bs = load("binary_sensor")
@@ -744,6 +743,20 @@ def test_every_panel_that_opens_says_closed_rather_than_off():
         if spec[0] not in openings:
             continue
         assert spec[3] is not None, f"{spec[0]} has no device class, so it reads On/Off"
+
+
+def test_the_driver_seatbelt_says_which_way_round_it_is():
+    """A bare On/Off told nobody whether "on" meant buckled. An E2 owner
+    buckled, polled and unbuckled (#72): `true` is the belt released. Safety
+    reads that as Unsafe, so the label carries the meaning; the state itself
+    is what it always was."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    bs = load("binary_sensor")
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+    spec, = [s for s in bs.SPECS if s[0] == "driver_seatbelt"]
+    assert spec[3] is BinarySensorDeviceClass.SAFETY, spec
+    assert "true" in spec[4] and True in spec[4], "true must read on - released"
 
 
 def test_the_park_brake_reads_the_codes_real_cars_send():
