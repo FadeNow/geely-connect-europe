@@ -78,6 +78,10 @@ window.mkHass = (opts) => {
   if (opts.charging !== undefined) {
     put(`switch.${P}_charging`, opts.charging);
   }
+  // Absent unless asked for, so a `defrost` button can be shown skipped (#87).
+  if (opts.defrost !== undefined) {
+    put(`switch.${P}_defrost`, opts.defrost);
+  }
   put(`sensor.${P}_speed`, opts.speed === undefined ? "0" : opts.speed,
       { unit_of_measurement: opts.speedUnit || "km/h" });
   // A car with a tank. The integration only creates these when the propulsion
@@ -2243,6 +2247,135 @@ def test_tapping_the_charging_button_toggles_the_charging_switch():
         return hass.serviceCalls.map((c) => [c[0], c[1], c[2].entity_id]);
     }"""
     assert _evaluate(script) == [["switch", "toggle", "switch.car_charging"]]
+
+
+# ------------------------ #87: the compact's buttons too, and a map among them
+
+_NAV_BTNS = """[...el.shadowRoot.querySelectorAll('.actions a.nav')]
+    .map((a) => [a.querySelector("span").textContent.trim(), a.getAttribute("href")])"""
+
+
+def test_the_compact_draws_its_six_buttons_by_default():
+    """The option moves nothing for anyone who never sets it - the separate
+    Lock and Unlock included - and a car with a position gains no map button
+    until one is asked for."""
+    assert _mount("geely-card-compact", _ACTS) == [
+        "lock", "unlock", "rapidheat", "rapidcool", "defrost", "trunk"]
+    assert _mount("geely-card-compact", _NAV_BTNS, at=[32.0853, 34.7818]) == []
+
+
+def test_buttons_picks_the_compacts_buttons_too():
+    """#87 asked for the strip's option on the compact card. In a list, `lock`
+    follows the car there as it does everywhere: mkHass locks the doors, so it
+    draws Unlock. Defrost is skipped on a car without the switch, as charging
+    and climate are, and a name Object happens to own is still unknown."""
+    got = _mount("geely-card-compact", _ACTS,
+                 cfg={"buttons": ["lock", "charging", "defrost", "find"]},
+                 charging="on", defrost="off")
+    assert got == ["unlock", "charging_sw", "defrost", "find"], got
+    got = _mount("geely-card-compact", _ACTS,
+                 cfg={"buttons": ["defrost", "constructor", "lock"]})
+    assert got == ["unlock"], got
+    assert _mount("geely-card-compact", _ACTS, cfg={"buttons": []}) == []
+
+
+def test_the_defrost_button_lights_while_defrost_is_on():
+    probe = """el.shadowRoot.querySelector('[data-act="defrost"]').classList.contains("on")"""
+    assert _mount("geely-card-strip", probe, cfg={"buttons": ["defrost"]}, defrost="on") is True
+    assert _mount("geely-card-strip", probe, cfg={"buttons": ["defrost"]}, defrost="off") is False
+
+
+def test_a_map_app_can_be_one_of_the_buttons():
+    """#87: navigate to the car from the compact card without a button-card
+    beside it. A map name in `buttons:` draws the same link the full card's
+    row does, in its place among the other buttons."""
+    probe = """[...el.shadowRoot.querySelectorAll('.actions > *')].map((b) =>
+        b.tagName === "A" ? ["link", b.getAttribute("href")] : ["button", b.dataset.act])"""
+    got = _mount("geely-card-compact", probe, cfg={"buttons": ["lock", "maps", "waze"]},
+                 at=[32.0853, 34.7818])
+    assert got == [
+        ["button", "unlock"],
+        ["link", "https://www.google.com/maps/dir/?api=1&destination=32.085300,34.781800"],
+        ["link", "https://www.waze.com/ul?ll=32.085300,34.781800&navigate=yes"],
+    ], got
+    # The strip and the mini take them as well.
+    assert _mount("geely-card-strip", _NAV_BTNS, cfg={"buttons": ["here"]}, at=[1.5, 2.5]) == [
+        ["HERE", "https://share.here.com/r/1.500000,2.500000"]]
+    assert _mount("geely-card-mini", _NAV_BTNS, cfg={"buttons": ["apple"]}, at=[1.5, 2.5]) == [
+        ["Apple Maps", "https://maps.apple.com/?daddr=1.500000,2.500000"]]
+
+
+def test_a_map_button_waits_for_a_position():
+    """A link to 0,0 is worse than none, on a button as on the row."""
+    assert _mount("geely-card-compact", _NAV_BTNS, cfg={"buttons": ["maps"]}) == []
+    assert _mount("geely-card-compact", _NAV_BTNS, cfg={"buttons": ["maps"]}, at=[0, 0]) == []
+
+
+def test_a_map_button_is_the_size_of_the_buttons_beside_it():
+    """An anchor is not a button: it brings an underline and the card's line
+    height, and either would set it apart from its neighbours."""
+    probe = """[...el.shadowRoot.querySelectorAll('.actions > *')].map((b) => {
+        const r = b.getBoundingClientRect();
+        return [Math.round(r.width), Math.round(r.height),
+                getComputedStyle(b).textDecorationLine]; })"""
+    for tag in ("geely-card-compact", "geely-card-strip", "geely-card-mini"):
+        got = _mount(tag, probe, cfg={"buttons": ["lock", "maps"]}, at=[1.5, 2.5])
+        assert len(got) == 2 and got[0] == got[1], (tag, got)
+
+
+def test_a_map_button_stays_live_while_driving():
+    """It opens a map and never touches the car, so the driving lock - which
+    greys out every command - leaves it alone, as it does the full card's row."""
+    probe = """{
+        commands: [...el.shadowRoot.querySelectorAll('.actions [data-act]')].map((b) => b.disabled),
+        link: el.shadowRoot.querySelector('.actions a.nav').getAttribute("href"),
+    }"""
+    got = _mount("geely-card-strip", probe, cfg={"buttons": ["lock", "maps"]},
+                 at=[1.5, 2.5], speed="63", engine="Running")
+    assert got["commands"] == [True], got
+    assert got["link"].startswith("https://www.google.com/maps/"), got
+
+
+def test_a_map_button_follows_the_car_when_it_moves():
+    """The tracker's state is a zone name - "not_home" stays "not_home" while
+    the car crosses town - so a card watching only the state would keep
+    pointing at where the car used to be."""
+    script = """() => {
+        const el = document.createElement("geely-card-strip");
+        document.body.appendChild(el);
+        el.setConfig({ buttons: ["maps"] });
+        el.hass = window.mkHass({ at: [1.5, 2.5] });
+        el.hass = window.mkHass({ at: [3.5, 4.5] });
+        return el.shadowRoot.querySelector("a.nav").getAttribute("href");
+    }"""
+    got = _evaluate(script)
+    assert got.endswith("destination=3.500000,4.500000"), got
+
+
+def test_nav_mode_locate_shows_the_car_instead_of_a_route():
+    """#87: someone who knows the way only wants to see where the car is.
+    `nav_mode: locate` turns every map link - the full card's row and the
+    buttons alike - into the app's own show-a-place link, and drops the travel
+    mode, which a pin has no use for."""
+    row = dict(_mount("geely-card", _nav_probe(),
+                      cfg={"nav": ["maps", "waze", "apple", "here"],
+                           "nav_mode": "locate", "nav_travel": "walking"},
+                      at=[1.5, 2.5]))
+    assert row == {
+        "Maps": "https://www.google.com/maps/search/?api=1&query=1.500000,2.500000",
+        "Waze": "https://www.waze.com/ul?ll=1.500000,2.500000",
+        "Apple Maps": "https://maps.apple.com/place?coordinate=1.500000,2.500000",
+        "HERE": "https://share.here.com/l/1.500000,2.500000",
+    }, row
+    headings = _mount("geely-card", """[...el.shadowRoot.querySelectorAll(".csub")]
+        .map((n) => n.textContent.trim())""", cfg={"nav_mode": "locate"}, at=[1.5, 2.5])
+    assert "Where the car is" in headings and "Navigate to the car" not in headings, headings
+    btn = _mount("geely-card-compact", """(() => {
+            const a = el.shadowRoot.querySelector('.actions a.nav');
+            return [a.getAttribute("href"), a.getAttribute("title")];
+        })()""", cfg={"buttons": ["maps"], "nav_mode": "locate"}, at=[1.5, 2.5])
+    assert btn == ["https://www.google.com/maps/search/?api=1&query=1.500000,2.500000",
+                   "Show the car in Maps"], btn
 
 
 # --------------------------------------------- windows open/close + indicator

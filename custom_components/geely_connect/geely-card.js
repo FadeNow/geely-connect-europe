@@ -95,17 +95,24 @@
    * its own default. Guessing is wrong in both directions - you walk to a car
    * parked round the corner and drive to one left at the airport - and the app
    * knows better than the card does.
+   *
+   * `locate` is the other link each app offers: the car as a pin on the map,
+   * no route (#87, `nav_mode: locate`). Each one is the app's documented
+   * show-a-place URL. Apple's `place?coordinate=` needs iOS 18.4 or later,
+   * because the older scheme has no way to ask for just a pin.
    */
   const NAV_APPS = {
     maps: {
       label: "Maps",
       url: (at, mode) => "https://www.google.com/maps/dir/?api=1&destination=" + at
         + (mode ? "&travelmode=" + mode : ""),
+      locate: (at) => "https://www.google.com/maps/search/?api=1&query=" + at,
     },
     waze: {
       // Waze navigates by car by definition; it has no walking mode to pass.
       label: "Waze",
       url: (at) => "https://www.waze.com/ul?ll=" + at + "&navigate=yes",
+      locate: (at) => "https://www.waze.com/ul?ll=" + at,
     },
     apple: {
       label: "Apple Maps",
@@ -113,18 +120,24 @@
         + (mode === "walking" ? "&dirflg=w"
           : mode === "transit" ? "&dirflg=r"
           : mode ? "&dirflg=d" : ""),
+      locate: (at) => "https://maps.apple.com/place?coordinate=" + at,
     },
     here: {
       // share.here.com opens the HERE WeGo app when it is installed and the web
-      // map when it is not. `m=w` is its walking flag.
+      // map when it is not. `m=w` is its walking flag; `/l/` is a location
+      // where `/r/` is a route.
       label: "HERE",
       url: (at, mode) => "https://share.here.com/r/" + at
         + (mode === "walking" ? "?m=w" : mode ? "?m=d" : ""),
+      locate: (at) => "https://share.here.com/l/" + at,
     },
   };
 
   /* Unchanged for anyone who has not asked: two links, not four. */
   const DEFAULT_NAV = ["maps", "waze"];
+
+  /* Own keys only: `buttons: [constructor]` must not find Object's. */
+  const IS_NAV = (k) => Object.prototype.hasOwnProperty.call(NAV_APPS, k);
 
   /* The car does not report this feature's state - the field that looks like its
    * flag reads 1 with the feature off (#13) - so the switch reads unknown and the
@@ -240,6 +253,7 @@
       "row.trip_meter": "Trip meter",
       "section.charging": "Charging",
       "section.fuel": "Fuel",
+      "section.locate": "Where the car is",
       "section.navigate": "Navigate to the car",
       "section.seat_cooling": "Seat cooling",
       "section.seat_heating": "Seat heating",
@@ -267,6 +281,7 @@
       "tooltip.rapid_cool": "Rapid cooling: the car's own preset - drives the setpoint to its minimum, ventilates both front seats and cracks the windows",
       "tooltip.rapid_heat": "Rapid warming: the car's own preset - drives the setpoint to its maximum and heats both front seats, plus the steering wheel where fitted",
       "tooltip.schedule_toggle": "Scheduled charging on / off",
+      "tooltip.show_in": "Show the car in {app}",
       "tooltip.trunk_release": "Unlocks the {word} latch - it does not open the {word} electrically. Lift it by hand, or use the key fob, within a few seconds before it re-locks itself.",
       "tooltip.warmer": "Warmer",
       "tooltip.wheel_heat": "Steering wheel heating on / off. Confirmed on a real car; the reading is slow, so the button holds its state for a moment.",
@@ -347,6 +362,7 @@
       "row.trip_meter": "เลขไมล์ทริป",
       "section.charging": "การชาร์จ",
       "section.fuel": "น้ำมัน",
+      "section.locate": "ตำแหน่งของรถ",
       "section.navigate": "นำทางไปยังรถ",
       "section.seat_cooling": "เบาะระบายความร้อน",
       "section.seat_heating": "เบาะทำความร้อน",
@@ -374,6 +390,7 @@
       "tooltip.rapid_cool": "เย็นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าต่ำสุด ระบายความร้อนเบาะคู่หน้าทั้งสองฝั่ง และเปิดกระจกเล็กน้อย",
       "tooltip.rapid_heat": "อุ่นเร็ว: โหมดสำเร็จรูปของรถ ปรับอุณหภูมิไปที่ค่าสูงสุดและอุ่นเบาะคู่หน้าทั้งสองฝั่ง รวมถึงพวงมาลัยในรุ่นที่มี",
       "tooltip.schedule_toggle": "ตั้งเวลาชาร์จ เปิด / ปิด",
+      "tooltip.show_in": "แสดงตำแหน่งรถใน {app}",
       "tooltip.trunk_release": "ปลดล็อกสลัก{word} - ไม่ได้เปิด{word}ด้วยไฟฟ้า ยกขึ้นด้วยมือ หรือใช้กุญแจรีโมท ภายในไม่กี่วินาทีก่อนที่จะล็อกกลับเอง",
       "tooltip.warmer": "อุ่นขึ้น",
       "tooltip.wheel_heat": "เปิด / ปิดพวงมาลัยไฟฟ้า ยืนยันแล้วบนรถจริง การอ่านค่าช้า ปุ่มจึงค้างสถานะไว้สักครู่",
@@ -454,6 +471,7 @@
       "row.trip_meter": "Contachilometri parziale",
       "section.charging": "Ricarica",
       "section.fuel": "Carburante",
+      "section.locate": "Dov'è l'auto",
       "section.navigate": "Naviga verso l'auto",
       "section.seat_cooling": "Ventilazione sedili",
       "section.seat_heating": "Riscaldamento sedili",
@@ -481,6 +499,7 @@
       "tooltip.rapid_cool": "Raffreddamento rapido: il preset dell'auto - porta il setpoint al minimo, ventila entrambi i sedili anteriori e abbassa leggermente i finestrini",
       "tooltip.rapid_heat": "Riscaldamento rapido: il preset dell'auto - porta il setpoint al massimo e riscalda entrambi i sedili anteriori, oltre al volante dove presente",
       "tooltip.schedule_toggle": "Ricarica programmata on / off",
+      "tooltip.show_in": "Mostra l'auto in {app}",
       "tooltip.trunk_release": "Sblocca il fermo {word} - non lo apre elettricamente. Sollevalo a mano, o usa il telecomando, entro pochi secondi prima che si blocchi di nuovo da solo.",
       "tooltip.warmer": "Più caldo",
       "tooltip.wheel_heat": "Riscaldamento volante on / off. Confermato su un'auto reale; la lettura è lenta, quindi il pulsante mantiene lo stato per un momento.",
@@ -1046,6 +1065,10 @@
      * them: they open a map app rather than doing anything to the car. */
     .cbtn.nav { text-decoration: none; color: var(--secondary-text-color); }
     .cbtn.nav:hover { color: var(--primary-text-color); }
+    /* The same link as an icon button (#87). An anchor inherits what a button
+     * does not - the underline and the card's line height - and either would
+     * set it apart from the buttons beside it. */
+    .act.nav { text-decoration: none; line-height: normal; }
 
     /* The second bar, on a car with a tank. Deliberately not the accent
      * colour: the two bars must not be mistaken for one another at a glance. */
@@ -1398,7 +1421,7 @@
       // - exactly how the door count and the charging label froze before. One
       // rule here cannot be forgotten by the sixth card.
       return [...new Set(this._watched().concat(ALWAYS_WATCHED,
-        this._config.car_image ? PHOTO_WATCHED : []))]
+        this._config.car_image ? PHOTO_WATCHED : [], this._navWatched()))]
         .map((e) => {
           const st = this._st(e);
           if (!st) return "-";
@@ -1408,6 +1431,12 @@
           if (e.startsWith("climate.")) {
             const a = st.attributes || {};
             return `${st.state}~${a.temperature}~${a.preset_mode}`;
+          }
+          // Likewise the position: the tracker's state is a zone name, and
+          // "not_home" stays "not_home" while the car moves across town.
+          if (e.startsWith("device_tracker.")) {
+            const a = st.attributes || {};
+            return `${st.state}~${a.latitude}~${a.longitude}`;
           }
           return st.state;
         })
@@ -1960,21 +1989,31 @@
     }
 
     /* The icon buttons on the strip and mini cards, chosen with `buttons:`
-     * (#83). An owner who unlocks the car and stops the charge every morning
-     * had a strip whose buttons were rapid heat and cool - fixed, and not the
-     * two he presses. Names, drawn in the order given: lock (follows the car:
-     * Lock or Unlock), heat, cool, trunk, find, charging, climate, refresh.
+     * (#83), and on the compact card when it is set (#87). An owner who
+     * unlocks the car and stops the charge every morning had a strip whose
+     * buttons were rapid heat and cool - fixed, and not the two he presses.
+     * Names, drawn in the order given: lock (follows the car: Lock or Unlock),
+     * heat, cool, defrost, trunk, find, charging, climate, refresh - and the
+     * map apps of `nav:`, maps, waze, apple and here, as links that open the
+     * car's position in that app (see _navLink).
      * An unknown name is skipped rather than drawn as a dead button, and so
      * is a name whose entity this car does not have - `charging` needs the
      * Charging switch, which a car with no start/stop control (#72) no longer
-     * gets. The defaults are exactly what each card drew before the option. */
+     * gets - and a map link before the car has reported where it is. The
+     * defaults are exactly what each card drew before the option. */
     _iconButtons(s, defaults) {
       const names = Array.isArray(this._config.buttons) ? this._config.buttons : defaults;
       const locked = s.locked && s.locked.state === "locked";
       const preset = this._preset();
       const out = [];
       for (const raw of names) {
-        switch (String(raw).toLowerCase()) {
+        const name = String(raw).toLowerCase();
+        if (IS_NAV(name)) {
+          const at = this._carAt();
+          if (at) out.push(this._navLink(name, at, "act nav"));
+          continue;
+        }
+        switch (name) {
           case "lock":
             out.push(locked
               ? this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")
@@ -1988,6 +2027,13 @@
             out.push(this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool",
               { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: preset === "Rapid Cooling" }));
             break;
+          case "defrost": {
+            const d = this._st("switch.defrost");
+            if (!d) break;
+            out.push(this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost",
+              { on: d.state === "on" }));
+            break;
+          }
           case "trunk":
             out.push(this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() }));
             break;
@@ -2225,40 +2271,72 @@
         { batt, fuel: Math.round(NUM(s.fuelPct)) });
     }
 
-    /* Navigate to where the car is parked, in whichever app the owner has.
-     *
-     * Links, not commands: they open a map and never touch the car, which is
-     * also why the driving lock leaves them alone - that disables `[data-act]`
-     * controls and these are plain anchors. Rendered only once the car has
-     * actually reported a position, because a link to 0,0 is worse than none.
-     */
-    _navRow() {
+    /* Where the car is, as "lat,lon" for a map link - or "" until the car has
+     * actually reported a position, because a link to 0,0 is worse than none. */
+    _carAt() {
       const st = this._st("device_tracker.location");
       const a = (st && st.attributes) || {};
       const lat = Number(a.latitude);
       const lon = Number(a.longitude);
       if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) return "";
-      const at = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+      return `${lat.toFixed(6)},${lon.toFixed(6)}`;
+    }
+
+    /* `nav_mode: locate` - a pin where the car is, rather than a route to it
+     * (#87). Someone who knows the way only wants to see where it is. */
+    _locating() {
+      return String(this._config.nav_mode || "").toLowerCase() === "locate";
+    }
+
+    /* One map link, the same on the full card's row and among the icon
+     * buttons, so the two can never send you to different places.
+     *
+     * Links, not commands: they open a map and never touch the car, which is
+     * also why the driving lock leaves them alone - that disables `[data-act]`
+     * controls and these are plain anchors. */
+    _navLink(key, at, cls) {
+      const app = NAV_APPS[key];
+      // "Maps" (Google Maps) is generic wording on the button, not a brand
+      // name the way "Waze" / "Apple Maps" / "HERE" are - Yossi named it
+      // explicitly alongside Lock/Climate/Odometer as a label needing a key.
+      const label = key === "maps" ? this._t("label.maps", app.label) : app.label;
+      const locate = this._locating();
+      // A pin has no route, so there is no travel mode to pass.
+      const mode = !locate && this._config.nav_travel
+        ? String(this._config.nav_travel).toLowerCase() : "";
+      const href = locate ? app.locate(at) : app.url(at, mode);
+      const title = locate
+        ? this._t("tooltip.show_in", "Show the car in {app}", { app: label })
+        : this._t("tooltip.navigate_with", "Navigate to the car with {app}", { app: label });
+      return `<a class="${cls}" href="${esc(href)}" target="_blank"
+          rel="noopener noreferrer"
+          title="${esc(title)}">${icon("nav")}<span>${esc(label)}</span></a>`;
+    }
+
+    /* Navigate to where the car is parked, in whichever app the owner has. */
+    _navRow() {
+      const at = this._carAt();
+      if (!at) return "";
       const want = Array.isArray(this._config.nav) ? this._config.nav
         : DEFAULT_NAV;
       const chosen = want
         .map((k) => String(k).toLowerCase())
-        .filter((k) => NAV_APPS[k]);
+        .filter(IS_NAV);
       if (!chosen.length) return "";
-      const mode = this._config.nav_travel
-        ? String(this._config.nav_travel).toLowerCase() : "";
-      // "Maps" (Google Maps) is generic wording on the button, not a brand
-      // name the way "Waze" / "Apple Maps" / "HERE" are - Yossi named it
-      // explicitly alongside Lock/Climate/Odometer as a label needing a key.
-      const link = (key) => {
-        const app = NAV_APPS[key];
-        const label = key === "maps" ? this._t("label.maps", app.label) : app.label;
-        return `<a class="cbtn nav" href="${esc(app.url(at, mode))}" target="_blank"
-            rel="noopener noreferrer"
-            title="${esc(this._t("tooltip.navigate_with", "Navigate to the car with {app}", { app: label }))}">${icon("nav")}<span>${esc(label)}</span></a>`;
-      };
-      return `<p class="micro csub" style="margin-top:12px">${icon("nav")} ${esc(this._t("section.navigate", "Navigate to the car"))}</p>
-        <div class="crow wrap">${chosen.map(link).join("")}</div>`;
+      const heading = this._locating()
+        ? this._t("section.locate", "Where the car is")
+        : this._t("section.navigate", "Navigate to the car");
+      return `<p class="micro csub" style="margin-top:12px">${icon("nav")} ${esc(heading)}</p>
+        <div class="crow wrap">${chosen.map((k) => this._navLink(k, at, "cbtn nav")).join("")}</div>`;
+    }
+
+    /* A map link drawn among the icon buttons moves with the car, so the card
+     * has to watch the position (folded into _signature for every card) - and
+     * only when one is drawn, so every other card keeps the signature it had. */
+    _navWatched() {
+      const names = Array.isArray(this._config.buttons) ? this._config.buttons : [];
+      return names.some((k) => IS_NAV(String(k).toLowerCase()))
+        ? ["device_tracker.location"] : [];
     }
 
     /* What to call the headline number, so it never means two things. */
@@ -2419,6 +2497,21 @@
         windowsOpen && `<span class="chip lvl" style="--lvl:${winFrac}" data-act="windows_menu" role="button" tabindex="0" title="${esc(this._t("tooltip.windows_menu", "Open or close the windows"))}">${icon("window")} ${esc(windowsWord)}${typeof winPos === "number" ? ` ${winPos}%` : ""}</span>`,
       ].filter(Boolean).join("");
 
+      // `buttons:` picks them, as on the strip and mini (#87). Unset, it is
+      // the six this card has always drawn - including the separate Lock and
+      // Unlock, a pair a list does not spell: `lock` in one follows the car,
+      // as it does on every card.
+      const actions = Array.isArray(this._config.buttons)
+        ? this._iconButtons(s, [])
+        : [
+          this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" }),
+          this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock"),
+          this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: this._preset() === "Rapid Warming" }),
+          this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: this._preset() === "Rapid Cooling" }),
+          this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" }),
+          this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() }),
+        ].join("");
+
       this.shadowRoot.innerHTML = `<style>${BASE_CSS}
         .head { display:flex; align-items:baseline; justify-content:space-between; }
         .title { font-size:13px; font-weight:600; letter-spacing:.02em; display:flex; align-items:center; gap:7px; }
@@ -2457,14 +2550,7 @@
           </div>
           <div style="margin:2px 0 10px">${this._bars(s)}</div>
           <div class="chips" style="margin-bottom:12px">${chips || `<span class="chip">${driving ? esc(drivingWord) : esc(parkedWord)}</span>`}</div>
-          <div class="actions">
-            ${this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })}
-            ${this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")}
-            ${this._actBtn("rapidheat", this._t("action.rapid_heat", "Rapid heat"), "heat", { title: this._t("tooltip.rapid_heat", RAPID_HEAT_HINT), on: this._preset() === "Rapid Warming" })}
-            ${this._actBtn("rapidcool", this._t("action.rapid_cool", "Rapid cool"), "cool", { title: this._t("tooltip.rapid_cool", RAPID_COOL_HINT), on: this._preset() === "Rapid Cooling" })}
-            ${this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-          </div>
+          <div class="actions">${actions}</div>
         </div>`;
       this._wire();
     }
@@ -2769,7 +2855,7 @@
   class GeelyCardStrip extends GeelyCardBase {
     _watched() {
       return ["sensor.battery", "sensor.electric_range", "sensor.charging_power",
-        "sensor.charger_connection", "switch.charging",
+        "sensor.charger_connection", "switch.charging", "switch.defrost",
         "lock.doors", "climate.climate", "binary_sensor.connected",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -2858,7 +2944,7 @@
       // both did.
       return ["sensor.battery", "sensor.electric_range",
         "sensor.interior_temperature", "sensor.charging_power",
-        "sensor.charger_connection", "switch.charging",
+        "sensor.charger_connection", "switch.charging", "switch.defrost",
         "lock.doors", "climate.climate", "binary_sensor.connected",
         "binary_sensor.door_driver", "binary_sensor.door_passenger",
         "binary_sensor.door_rear_left", "binary_sensor.door_rear_right",
@@ -3351,7 +3437,7 @@
       {
         type: "geely-card-compact",
         name: "Geely Card (compact)",
-        description: "Battery, range and the controls that matter - lock, rapid heat / cool, defrost, trunk.",
+        description: "Battery, range and the controls that matter - lock, rapid heat / cool, defrost, trunk by default, or the buttons you choose with buttons:, a map app among them.",
         preview: true,
       },
       {
@@ -3369,7 +3455,7 @@
       {
         type: "geely-card-strip",
         name: "Geely Card (strip)",
-        description: "One row: range, battery, lock state - and icon buttons you choose with buttons: (lock, rapid heat / cool, trunk and find by default; charging, climate and refresh available).",
+        description: "One row: range, battery, lock state - and icon buttons you choose with buttons: (lock, rapid heat / cool, trunk and find by default; defrost, charging, climate, refresh and the map apps available).",
         preview: true,
       },
       {
