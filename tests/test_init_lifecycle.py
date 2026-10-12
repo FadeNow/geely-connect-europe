@@ -275,6 +275,52 @@ def test_purging_full_exposure_removes_only_raw_sensors():
     assert n == 1 and reg.removed == ["sensor.raw1"]
 
 
+def _unserved_registry():
+    mk = lambda eid, uid: types.SimpleNamespace(entity_id=eid, unique_id=uid)
+    return [mk("binary_sensor.btm", f"geely_{FAKE_VIN}_bs_battery_temp_maintenance"),
+            mk("switch.sched", f"geely_{FAKE_VIN}_sw_scheduled_charging"),
+            mk("time.start", f"geely_{FAKE_VIN}_time_scheduled_charging_start"),
+            mk("time.end", f"geely_{FAKE_VIN}_time_scheduled_charging_end"),
+            mk("switch.pc", f"geely_{FAKE_VIN}_sw_parking_comfort"),
+            mk("switch.charging", f"geely_{FAKE_VIN}_sw_charging"),
+            mk("sensor.keep", f"geely_{FAKE_VIN}_battery")]
+
+
+def test_entities_the_api_cannot_serve_are_cleared_from_the_registry():
+    """An earlier version built them on a new-platform car, where they could
+    only read unknown and fail when pressed. Left alone they would sit on the
+    device page as "no longer provided" (#88). The Charging switch stays: the
+    state it reads is real even where its command is not mapped."""
+    m = _mod()
+    reg = _EntityRegistry([])
+    fake_er = _er_module(reg, per_entry=_unserved_registry())
+    api = types.SimpleNamespace(serves_state=False, serves_charge_server=False,
+                                can_send=lambda sid: sid not in ("RSM", "RCS"))
+    with _Patched(m, er=fake_er):
+        n = m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"), api)
+    assert n == 5
+    assert sorted(reg.removed) == ["binary_sensor.btm", "switch.pc", "switch.sched",
+                                   "time.end", "time.start"], reg.removed
+
+
+def test_an_api_that_serves_everything_loses_nothing():
+    """These are live entities on every old-platform car - the reason they are
+    cleared per entry and never through the global obsolete list. A new-
+    platform car without an x-vin keeps Parking Comfort: the legacy route it
+    commands through takes RSM."""
+    m = _mod()
+    for api, kept in ((object(), 7),
+                      (types.SimpleNamespace(serves_state=False, serves_charge_server=False,
+                                             can_send=lambda sid: True), 3)):
+        reg = _EntityRegistry([])
+        with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
+            m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"), api)
+        assert len(_unserved_registry()) - len(reg.removed) == kept, reg.removed
+    for pattern in m._OBSOLETE_UNIQUE_ID_PATTERNS:
+        for e in _unserved_registry():
+            assert pattern not in e.unique_id, (pattern, e.unique_id)
+
+
 # ---------------------------------------------------------------- intervals ---
 
 def test_a_broken_clock_cannot_take_the_interval_down():
@@ -479,6 +525,47 @@ def test_setup_builds_the_bundle_and_forwards_every_platform():
     assert coord.data["_state"] == {"sentry": "1"}
     assert coord.data["_scheduled_charging"] == {"rbcStartTime": "23:00"}
     assert api.kw["vin"] == FAKE_VIN
+
+
+def _without_secondary(api):
+    api.serves_state = False
+    api.serves_charge_server = False
+
+
+def test_an_api_without_the_secondary_endpoints_is_not_asked_for_them():
+    """The new platform raised on both, on every poll that fetched them - which
+    is every poll while the car charges (#88)."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=_without_secondary)
+    hass.data["geely_connect"]["e1"]["poll_state"]["force_secondary"] = True
+    asyncio.run(coord.refresh())
+    assert ok and "status" in api.calls
+    assert "state" not in api.calls and "charge6" not in api.calls, api.calls
+    assert "_state" not in coord.data and "_scheduled_charging" not in coord.data
+
+
+def test_a_refresh_press_is_spent_where_there_is_no_state_block_to_wait_for():
+    """The flag waits for `_state` so a failed fetch does not swallow the press.
+    On an api with no state block that wait never ended, and the flag also wakes
+    the car for a position fix - so one press woke it on every poll after (#88).
+    Where the block exists and its fetch fails, the press still waits."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=_without_secondary)
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    poll["force_secondary"] = True
+    before = api.calls.count("position")
+    asyncio.run(coord.refresh())
+    assert api.calls.count("position") == before + 1, "the press must still wake the car once"
+    assert "force_secondary" not in poll, "the press was never spent"
+
+    def failing_state(api_):
+        api_.state_error = ValueError("gateway said no")
+
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=failing_state)
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    poll["force_secondary"] = True
+    asyncio.run(coord.refresh())
+    assert poll.get("force_secondary") is True, "a failed state fetch must keep the press"
 
 
 def test_manual_mode_never_starts_a_timer():

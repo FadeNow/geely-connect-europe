@@ -450,6 +450,22 @@ class ZeekrAdapter:
                                 [{"key": "pai", "value": "1"}])
         return {}
 
+    # The two secondary endpoints below are not mapped on this platform, on
+    # either route. Said here as well as by raising, so the platforms leave
+    # out the entities that live only on them and the poll stops asking -
+    # see helpers.api_serves (#88).
+    serves_state = False
+    serves_charge_server = False
+
+    def can_send(self, service_id: str) -> bool:
+        """Whether control() would send this serviceId rather than refuse it.
+
+        Without an x-vin every command goes the legacy route, which takes any
+        serviceId; with one, only what _translate_command maps goes out."""
+        if not self._client.enc_vin:
+            return True
+        return _translate_command(service_id, "start", None) is not None
+
     def vehicle_status_state(self) -> dict:
         raise NotImplementedError(
             "new-platform status/state endpoint not mapped yet"

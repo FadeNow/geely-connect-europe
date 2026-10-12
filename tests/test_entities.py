@@ -6,7 +6,7 @@ in a bare checkout.
 import asyncio
 import datetime as dt
 
-from conftest import FAKE_VIN, have_homeassistant, load
+from conftest import FAKE_VIN, PKG, have_homeassistant, load
 from run import skip
 
 STATUS = {
@@ -200,11 +200,11 @@ def test_a_missing_or_unknown_verdict_keeps_the_charging_entities():
         assert _CHARGING_KEYS <= got, _CHARGING_KEYS - got
 
 
-_NEW_PLATFORM_KEYS = frozenset({"bs_is_charging", "bs_is_plugged_in"})
+_RETIRED_KEYS = frozenset({"bs_is_charging", "bs_is_plugged_in"})
 
-# Added by the same change as the two above, and present in BOTH platforms'
-# payloads - a gate that swept these up would delete six live entities from
-# every existing install.
+# Added by the same change as the two retired ones, and present in BOTH
+# platforms' payloads - a gate that swept these up would delete seven live
+# entities from every existing install.
 _BOTH_PLATFORM_KEYS = frozenset({
     "bs_door_lock_driver", "bs_door_lock_passenger", "bs_door_lock_rear_left",
     "bs_door_lock_rear_right", "trip_meter_2", "discharge_current",
@@ -219,35 +219,77 @@ def _new_platform_entry():
     return e
 
 
-def test_the_reported_charging_booleans_are_new_platform_only():
-    """`isCharging` / `isPluggedIn` are in the new platform's payload only, so
-    an old-platform car must not be given two tiles that can never say
-    anything."""
+def test_the_reported_charging_booleans_are_retired_everywhere():
+    """`isCharging` / `isPluggedIn` read false through a 6.8 kW AC charge that
+    the Charging switch, Charger Plug and Charging Power all reported (#88),
+    and nobody had ever seen either read true. Not built on any platform, and
+    purged from installs that have them."""
     if not have_homeassistant():
         skip("homeassistant not installed")
-    leaked = _keys(_build_all()) & _NEW_PLATFORM_KEYS
-    assert leaked == set(), leaked
-    got = _keys(_build_all(entry=_new_platform_entry()))
-    assert _NEW_PLATFORM_KEYS <= got, _NEW_PLATFORM_KEYS - got
+    for entry in (None, _new_platform_entry()):
+        leaked = _keys(_build_all(entry=entry)) & _RETIRED_KEYS
+        assert leaked == set(), leaked
+    import ast
+    import io
+    import os
+    src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+    block = src.split("_OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = ", 1)[1]
+    patterns = ast.literal_eval(block[:block.index("\n)\n") + 2])
+    for key in _RETIRED_KEYS:
+        uid = f"geely_{FAKE_VIN}_{key}"
+        assert any(p in uid for p in patterns), uid
 
 
-def test_the_gate_is_the_token_not_the_platform_name():
-    """A zeekr entry with no x-vin token still polls the legacy status path and
-    gets the legacy fields, so the token is what the gate has to read."""
-    if not have_homeassistant():
-        skip("homeassistant not installed")
-    e = _Entry()
-    e.data = {"vin": FAKE_VIN, "pressure_unit": "psi", "platform": "zeekr"}
-    leaked = _keys(_build_all(entry=e)) & _NEW_PLATFORM_KEYS
-    assert leaked == set(), leaked
-
-
-def test_the_platform_gate_takes_only_those_two_entities():
+def test_the_promoted_fields_stay_on_both_platforms():
     """The seven other fields promoted alongside them are on both platforms."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     got = _keys(_build_all())          # the default entry is an old-platform one
     assert _BOTH_PLATFORM_KEYS <= got, _BOTH_PLATFORM_KEYS - got
+
+
+# Live only on the secondary status block or the charge-server - or, for
+# Parking Comfort, behind a command the new route does not map (#88).
+_UNSERVED_KEYS = frozenset({
+    "bs_battery_temp_maintenance", "sw_scheduled_charging",
+    "time_scheduled_charging_start", "time_scheduled_charging_end",
+    "sw_parking_comfort",
+})
+
+
+class _NewPlatformApi:
+    """What the platforms see of a ZeekrAdapter with an x-vin."""
+    serves_state = False
+    serves_charge_server = False
+
+    @staticmethod
+    def can_send(service_id):
+        return service_id not in ("RSM", "RCS")
+
+
+def test_a_new_platform_car_gets_no_entity_it_could_never_feed():
+    """On the new platform these read unknown forever and, where they are
+    controls, fail when pressed - the scheduled-charging switch with "charge-
+    server write not mapped yet". A tile that never says anything is worse than
+    no tile. The Charging switch stays: its state is real."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    got = _keys(_build_all(entry=_new_platform_entry(), api=_NewPlatformApi()))
+    assert got & _UNSERVED_KEYS == set(), got & _UNSERVED_KEYS
+    assert "sw_charging" in got and "bs_charger_plugged_in" in got
+    # The legacy client says nothing about itself and keeps every one of them.
+    assert _UNSERVED_KEYS <= _keys(_build_all())
+
+
+def test_parking_comfort_goes_only_where_its_command_cannot_be_sent():
+    """Without an x-vin a new-platform entry commands through the legacy
+    route, which takes RSM - so the switch is kept there."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    legacy_route = type("_NoXvin", (_NewPlatformApi,), {"can_send": staticmethod(lambda s: True)})
+    got = _keys(_build_all(api=legacy_route()))
+    assert "sw_parking_comfort" in got
+    assert got & (_UNSERVED_KEYS - {"sw_parking_comfort"}) == set()
 
 
 def test_full_exposure_keeps_fields_whose_curated_twin_was_not_built():

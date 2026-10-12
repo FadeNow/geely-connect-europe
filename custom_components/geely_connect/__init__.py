@@ -8,6 +8,7 @@ import os
 import shutil
 import socket
 from datetime import timedelta
+from typing import Any
 
 import voluptuous as vol
 
@@ -68,10 +69,11 @@ from .const import (
     POLL_PROFILES,
     SCAN_INTERVAL_SECONDS,
     SERIES_TO_FRIENDLY_NAME,
+    SERVICE_PARKING_COMFORT,
     region_config,
 )
-from .helpers import (password_decrypt, vehicle_metadata, schedule_refresh,
-                      speed_is_stale)
+from .helpers import (api_can_send, api_serves, password_decrypt,
+                      vehicle_metadata, schedule_refresh, speed_is_stale)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -149,6 +151,9 @@ _OBSOLETE_UNIQUE_ID_PATTERNS: tuple[str, ...] = (
     "_bs_defrost_active",      # → switch.defrost
     "_bs_preclimate_active",   # → climate.climate (hvac_mode)
     "_bs_charging",            # → switch.charging
+    # The new platform's isCharging / isPluggedIn, retired: false during a
+    # charge that three verified entities reported (#88). See binary_sensor.
+    "_bs_is_charging", "_bs_is_plugged_in",
     # Sensor renames (key changed → unique_id changed → entity needs purge)
     "_odometer",               # → renamed to total_mileage
     "_tyre_pressure_fl",       # → tire_pressure_fl  (UK→US spelling)
@@ -230,6 +235,39 @@ def _purge_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
     if to_delete:
         _LOGGER.info("Purged %d obsolete entities: %s", len(to_delete), to_delete)
     return len(to_delete)
+
+
+def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any) -> int:
+    """Remove this entry's entities that its api cannot feed or send for.
+
+    The platforms no longer create them (see helpers.api_serves), but one
+    created by an earlier version would otherwise stay on the device page as
+    "no longer provided" until its owner deleted it by hand (#88). Per entry,
+    and keyed on the api rather than listed in _OBSOLETE_UNIQUE_ID_PATTERNS:
+    that list is global, and these are working entities on every car whose
+    api serves them."""
+    gone: list[str] = []
+    if not api_serves(api, "state"):
+        gone.append("_bs_battery_temp_maintenance")
+    if not api_serves(api, "charge_server"):
+        gone += ["_sw_scheduled_charging", "_time_scheduled_charging_start",
+                 "_time_scheduled_charging_end"]
+    if not api_can_send(api, SERVICE_PARKING_COMFORT):
+        gone.append("_sw_parking_comfort")
+    if not gone:
+        return 0
+    registry = er.async_get(hass)
+    stale = [
+        e.entity_id
+        for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if e.unique_id.endswith(tuple(gone))
+    ]
+    for entity_id in stale:
+        registry.async_remove(entity_id)
+    if stale:
+        _LOGGER.info("Removed %d entities this platform cannot serve yet: %s",
+                     len(stale), stale)
+    return len(stale)
 
 
 def _refresh_device_name(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -707,35 +745,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # opposite made it invisible.
         # `forced` was read before the position wake above; not re-read here so
         # one press means one consistent answer across both gates.
+        # An api that cannot serve an endpoint is not asked for it (#88): the
+        # new platform raised on both, on every charging poll.
+        serves_state = api_serves(api, "state")
         if forced or charging or was_charging or ((cyc - 1) % _SECONDARY_EVERY == 0):
-            try:
-                state_resp = await _call_with_retry(api.vehicle_status_state)
-                if state_resp.get("code") in _SUCCESS_CODES and isinstance(state_resp.get("data"), dict):
-                    data["_state"] = state_resp["data"]
-            except GeelyAuthError as e:
-                raise ConfigEntryAuthFailed(str(e)) from e
-            except GeelyTLSPinError as e:
-                # A pin failure means the server key changed - an active
-                # MITM or a legitimate rotation. Never hide it at DEBUG.
-                _LOGGER.error("vehicle state fetch: TLS pin check failed: %s", e)
-            except Exception as e:  # noqa: BLE001
-                _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
-            try:
-                sc = await _call_with_retry(api.charge_server_get, "6")
-                if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
-                    data["_scheduled_charging"] = sc["data"]
-            except GeelyTLSPinError as e:
-                # A pin failure means the server key changed - an active
-                # MITM or a legitimate rotation. Never hide it at DEBUG.
-                _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
-            except Exception as e:  # noqa: BLE001
-                _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
+            if serves_state:
+                try:
+                    state_resp = await _call_with_retry(api.vehicle_status_state)
+                    if state_resp.get("code") in _SUCCESS_CODES and isinstance(state_resp.get("data"), dict):
+                        data["_state"] = state_resp["data"]
+                except GeelyAuthError as e:
+                    raise ConfigEntryAuthFailed(str(e)) from e
+                except GeelyTLSPinError as e:
+                    # A pin failure means the server key changed - an active
+                    # MITM or a legitimate rotation. Never hide it at DEBUG.
+                    _LOGGER.error("vehicle state fetch: TLS pin check failed: %s", e)
+                except Exception as e:  # noqa: BLE001
+                    _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
+            if api_serves(api, "charge_server"):
+                try:
+                    sc = await _call_with_retry(api.charge_server_get, "6")
+                    if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
+                        data["_scheduled_charging"] = sc["data"]
+                except GeelyTLSPinError as e:
+                    # A pin failure means the server key changed - an active
+                    # MITM or a legitimate rotation. Never hide it at DEBUG.
+                    _LOGGER.error("scheduled-charging fetch: TLS pin check failed: %s", e)
+                except Exception as e:  # noqa: BLE001
+                    _LOGGER.debug("scheduled-charging fetch non-fatal failure: %s", e)
             # Cleared only once the fetch it asked for has actually been
             # attempted to completion. Clearing it before, as this did for a
             # day, meant one failed vehicle-state call silently swallowed the
             # user's Refresh Data press and the next press was needed to try
             # again.
-            if "_state" in data:
+            #
+            # Where there is no state block to wait for, the press has had all
+            # it can get. Waiting for `_state` there held the flag up for good
+            # after one press, and the flag also wakes the car for a position
+            # fix - so every poll from then on woke it (#88).
+            if "_state" in data or not serves_state:
                 poll_state.pop("force_secondary", None)
 
         fail_state["consecutive"] = 0
@@ -835,6 +883,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # counter says.
         "poll_state":    poll_state,
     }
+    _purge_unserved_entities(hass, entry, api)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload when the options flow changes the polling mode / pressure unit /
     # language, so the new choice takes effect without a restart.

@@ -62,6 +62,8 @@ from .const import (
     SERVICE_WINDOW,
 )
 from .helpers import (
+    api_can_send,
+    api_serves,
     walk as _walk,
     steering_wheel_fitted,
     windows_open,
@@ -192,6 +194,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         if flag and not caps.get(flag, True):
             _LOGGER.debug("switch %s skipped (capability flag %s=False)", defn[0], flag)
             continue
+        # Parking Comfort reads no state on any car (see its row above), so on
+        # a route that cannot send its command it would be a switch that does
+        # nothing at all - the new platform's own route, until RSM is captured
+        # there (#88). Charging keeps its switch: the state it reads is real.
+        if defn[0] == "parking_comfort" and not api_can_send(bundle.get("api"), defn[3]):
+            _LOGGER.debug("switch %s skipped (%s not sendable on this route)",
+                          defn[0], defn[3])
+            continue
         entities.append(GeelySwitch(hass, bundle, *defn[:-1]))
     if caps.get("windows.enabled", True):
         entities.append(GeelyWindowVentilationSwitch(hass, bundle))
@@ -204,8 +214,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
     # not advertise the wheel gets no switch until a reload finds either.
     if steering_wheel_fitted(caps, bundle["coordinator"].data):
         entities.append(GeelySteeringWheelHeatSwitch(hass, bundle))
-    if charges and (caps.get("scheduled_charging.enabled", True)
-                    or caps.get("charging.enabled", True)):
+    # Read and written through the charge-server, which the new platform does
+    # not serve yet - see helpers.api_serves (#88).
+    if charges and api_serves(bundle.get("api"), "charge_server") and (
+            caps.get("scheduled_charging.enabled", True)
+            or caps.get("charging.enabled", True)):
         entities.append(GeelyScheduledChargingSwitch(hass, bundle))
     add_entities(entities)
 

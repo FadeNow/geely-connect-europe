@@ -98,6 +98,34 @@ def test_unmapped_endpoints_raise_cleanly():
             pass
 
 
+def test_the_adapter_says_which_endpoints_it_cannot_serve():
+    """Raising is how a call learns it; the platforms have to know before
+    they build an entity on one of these, and the poll before it asks (#88)."""
+    a, c = _make_adapter()
+    assert a.serves_state is False and a.serves_charge_server is False
+    # Same on the x-vin route: neither endpoint is mapped on either.
+    c.enc_vin = "opaque-token"
+    assert a.serves_state is False and a.serves_charge_server is False
+
+
+def test_can_send_is_what_control_would_actually_send():
+    """Without an x-vin every command goes the legacy route, which takes any
+    serviceId. With one, only the captured mappings go out - and control()
+    refuses the rest, so can_send must say no to exactly those."""
+    a, c = _make_adapter()
+    for sid in ("RSM", "RCS", "RDL_2", "RHL"):
+        assert a.can_send(sid) is True, sid
+    c.enc_vin = "opaque-token"
+    assert a.can_send("RDL_2") is True and a.can_send("RHL") is True
+    for sid in ("RSM", "RCS"):
+        assert a.can_send(sid) is False, sid
+        try:
+            a.control(sid, [])
+            assert False, f"control() sent {sid}, which can_send refused"
+        except ad.GeelyControlError:
+            pass
+
+
 def test_hf_expiry_math():
     a, c = _make_adapter(hf_expiry=0)
     assert a._hf_expired() is False, "unknown expiry defers to the authy heuristic"

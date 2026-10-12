@@ -1139,10 +1139,11 @@ entities are created only for a car with a tank, so a battery-electric EX5 gets
 86 entities and a PHEV gets 99. That's a decision made once at startup from your
 account's `powerType` plus the car's own telemetry - there is no option to set.
 
-Two more - `Charging (reported)` and `Plugged In (reported)` - are built only for
-a car read through the new Geely EM platform, because the old platform's payload
-does not carry those two fields at all. A car on the new platform therefore gets
-86, or 99 with a tank.
+A car on the new Geely EM platform gets a few fewer. Its schedule and
+secondary-status endpoints are not mapped yet, so *Scheduled Charging* (the
+switch and its two times) and *Battery Temperature Maintenance* are left out
+rather than built to read unknown - and with a vehicle token, so is *Parking
+Comfort*, whose command is not mapped on that route either.
 
 The only thing not created is the raw full-exposure pass (see below), because
 those are duplicates of the curated entities by definition. Two aggregates that

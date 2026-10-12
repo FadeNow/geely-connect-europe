@@ -214,6 +214,28 @@ def steering_wheel_fitted(caps: dict | None, data: Any) -> bool:
     return walk(data or {}, (*_CLIMATE_PATH, "steerWhlHeatingSts")) in ("1", 1, "2", 2)
 
 
+def api_serves(api: Any, endpoint: str) -> bool:
+    """Whether the car's api can serve one of the secondary endpoints:
+    `state` (the *Active flags) or `charge_server` (the schedules).
+
+    The new-platform adapter says no to both until they are mapped, and an
+    entity that lives only on one of them can read nothing but unknown there
+    and fail when pressed - so it is not created, and the poll does not ask
+    (#88). The legacy client does not answer, and serves them all.
+    """
+    return bool(getattr(api, f"serves_{endpoint}", True))
+
+
+def api_can_send(api: Any, service_id: str) -> bool:
+    """Whether a control with this serviceId would go out at all.
+
+    On the new platform's own route only what has been captured is mapped,
+    and an unmapped command fails without reaching the car; every other api
+    sends whatever it is given."""
+    can_send = getattr(api, "can_send", None)
+    return True if can_send is None else bool(can_send(service_id))
+
+
 def device_info(vin: str, device_name: str | None = None) -> DeviceInfo:
     """The one device every entity of a vehicle belongs to."""
     return DeviceInfo(

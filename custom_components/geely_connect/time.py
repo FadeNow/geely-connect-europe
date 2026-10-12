@@ -36,7 +36,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact
 from .const import DOMAIN
-from .helpers import truthy as _truthy, schedule_refresh
+from .helpers import api_serves, truthy as _truthy, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +66,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         return
     if not caps.get("scheduled_charging.enabled", True) and not caps.get("charging.enabled", True):
         _LOGGER.info("Capability says scheduled charging not supported - skipping time entities")
+        return
+    # Read and written through the charge-server, which the new platform does
+    # not serve yet - see helpers.api_serves (#88).
+    if not api_serves(bundle.get("api"), "charge_server"):
+        _LOGGER.debug("No charge-server on this platform - skipping the charging schedule")
         return
     add_entities([
         GeelyScheduledChargingTime(hass, bundle, "start"),
