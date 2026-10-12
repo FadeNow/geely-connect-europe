@@ -10,7 +10,10 @@
 A **security-hardened** [Home Assistant](https://www.home-assistant.io/)
 integration for Geely vehicles that use the **Geely Global / International**
 mobile app. Owner-tested on the **Geely EX5** (Europe, Australia and Brazil -
-battery-only) and the **Geely Starray PHEV** (Australia, petrol + plug-in); it
+battery-only), the **Geely EX2** (battery-only: Australia on the [new Geely EM
+platform](#the-new-geely-em-zeekr-platform--a-different-experimental-model),
+South Africa - where it is sold as the **E2** - and Colombia) and the **Geely
+Starray PHEV** (Australia, petrol + plug-in); it
 is capability-driven, so other Geely models should work too - only the entities
 your specific car reports are created, and a car with a tank gets the fuel and
 engine ones on top.
@@ -590,8 +593,8 @@ back off removes the generated entities again.
 | **Steering Wheel Heat** | On/off, on cars that show evidence of the feature, and on the built-in cards next to Fresh air. The command comes from a capture of the official app's own button ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - `rce.heat: steering_wheel`, an underscore where every seat name uses hyphens, and no level, because the car cannot report one. **Confirmed on a real car** - both rapid warming and this standalone toggle turn the wheel on. The car's status field is slow to catch up, so the button holds its requested state for a moment and re-checks the car twice |
 | **Windows** | Open / close / ventilate |
 | **Sunroof / Sunshade** | Open / close |
-| **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened |
-| **Parking Comfort** | On/off. The switch reports *unknown* rather than a state: the field that looked like its on/off flag reads 1 on a car with the feature off, and no field in this API reports it truthfully |
+| **Charging** | Start / stop, plus scheduled charging (start & end time). Stopping a charge does not release the cable: the charge-port latch follows the doors, so to let someone unplug remotely, stop the charge **and** unlock the car - it re-locks itself afterwards if no door is opened. A car whose capability catalogue offers only a charge start *time* and no start/stop switch - the South African E2 and the Colombian EX2 ([#72](https://github.com/YossiKon/geely-connect/issues/72)) - gets no Charging switch: its own app has no start/stop either, and the command did nothing there |
+| **Parking Comfort** | On/off. The switch reports *unknown* rather than a state: the field that looked like its on/off flag reads 1 on a car with the feature off, and no field in this API reports it truthfully. Not created on the E2 and the Colombian EX2, whose catalogue and app have no such option ([#72](https://github.com/YossiKon/geely-connect/issues/72)) |
 | **Cabin purge (G-Clean)** | On/off |
 | **Find Car** | Horn + lights |
 
@@ -1024,15 +1027,15 @@ Geely released a separate new app on a new backend, and the setup form now opens
 with a **platform picker**. The default is the existing backend and nothing
 changes for current installs — an entry with no platform marker stays on the
 legacy path. The new **Geely EM (Zeekr)** option is **experimental**, but no
-longer a single-account story. Live-verified on real Australian cars today: the
-vehicle read (status, position, capabilities and the two charging-reported
-entities), and - for a migrated car addressed by its vehicle token - remote
+longer a single-account story. Live-verified on real Australian **EX2s** today:
+the vehicle read (status, position and capabilities), and - for a migrated car
+addressed by its vehicle token - remote
 commands through the new gateway's own control route: find / lights (confirmed
 by two owners), windows, sunshade and vent, rapid heat / cool, G-Clean, seat
 and steering-wheel heat, defrost, the GPS position wake, and - since v1.51.0 -
 **door lock / unlock**. That last one was held back from August until a second
 owner had run the cycle on his own car, because a reversed mapping there opens
-a vehicle instead of securing it; two Australian cars now lock and unlock as
+a vehicle instead of securing it; two Australian EX2s now lock and unlock as
 mapped. A service the catalogue does not cover still answers with a clear "not
 mapped" error rather than sending a guessed body to a car. Non-AU regions are
 still unverified.
@@ -1072,7 +1075,7 @@ Geely runs a separate backend per area, each with its **own app credentials**:
 
 | Area | Backend | Status |
 |---|---|---|
-| **EU / International** | `api.ecloudeu.com` | ✅ supported |
+| **EU / International** (and South African accounts, which resolve here) | `api.ecloudeu.com` | ✅ supported |
 | **NA** (US, CA, MX - and Brazilian accounts, which resolve here) | `api.ecloudus.com` | ✅ supported |
 | **APAC** (AU, NZ, JP, KR, SG, TH…) | `api.ecloudkr.com` | ✅ supported |
 | **SA** | `tsp-geely-api-sa.xcloudsvc.com` | ❌ credentials not public |
@@ -1213,6 +1216,15 @@ The likeliest reading of all six is that the field is live only while the car is
 awake, and holds some other value once it has been sitting - but nobody has
 proved that, and the integration does not guess. **It is passed through
 untouched.**
+
+The one exception is a reading the car itself disowns. The EX2 and the E2 send
+`exteriorTempValidity` beside the number, and while it reads false the number
+is not a measurement: an EX2 in Colombia published 130-131 °C on a 25-28 °C day
+([#24](https://github.com/YossiKon/geely-connect/issues/24)) and a South African
+E2 110-130 °C ([#72](https://github.com/YossiKon/geely-connect/issues/72)),
+both with the flag false. The entity reads **unknown** then - no offset could
+correct a value that was never measured. A car that does not send the flag is
+unaffected.
 
 **What you can do about it**
 
