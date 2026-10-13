@@ -10,7 +10,7 @@
       },
       "user": {
         "title": "Geely Connect",
-        "description": "Unofficial community integration - not affiliated with Geely. Pick the backend your account uses (default: the existing Geely backend, email + code). Accounts on the new Geely EM app platform (email + password, experimental) pick that option instead - complete the app's setup on your phone first.\\n\\nPolling mode decides how often the car is contacted. Geely allows one session per account, so every poll briefly signs the phone app out - pick Manual if that bothers you.",
+        "description": "Unofficial community integration - not affiliated with Geely. Pick the backend your account uses (default: the existing Geely backend, email + code). Accounts on the new Geely EM app platform (email + password, experimental) pick that option instead - complete the app's setup on your phone first.\n\nPolling mode decides how often the car is contacted. Geely allows one session per account, so every poll briefly signs the phone app out - pick Manual if that bothers you.",
         "data": {
           "platform": "Platform",
           "email": "Email",
