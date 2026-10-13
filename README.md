@@ -243,7 +243,8 @@ HACS frontend package, no resource to add, nothing to copy. Open any
 dashboard, **Add card**, and search "Geely":
 
 > 🌐 **The cards speak your language.** Every label follows Home Assistant's
-> UI language automatically - English and Thai ship today - and falls back to
+> UI language automatically - English, Thai, Italian and Bulgarian ship
+> today - and falls back to
 > English wherever a translation has a gap, so a partial dictionary never
 > blanks a button. A Lovelace card can never read `translations/*.json` (the
 > frontend only loads its fixed set of translation categories), so the card
