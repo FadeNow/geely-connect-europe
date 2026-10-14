@@ -2,6 +2,7 @@
 
   Find car        → RHL / [{rhl: "horn-light-flash"}]     verified live
   Unlock Trunk    → RDU_2 / [{target: "trunk"}]
+                    RTU / []  where the catalogue speaks 1.0 (an E2, #72)
       Unlocks the tailgate LATCH. It does not open the tailgate electrically -
       the gate still has to be lifted by hand, and it re-locks itself after a
       short window if nobody does. Four owners across three trims have confirmed
@@ -39,6 +40,8 @@ from .const import (
     SERVICE_FIND_CAR,
     SERVICE_FIND_CAR_PARAMS,
     SERVICE_TAILGATE,
+    SERVICE_TAILGATE_1_0,
+    SERVICE_TAILGATE_1_0_PARAMS,
     SERVICE_TAILGATE_PARAMS,
 )
 
@@ -66,6 +69,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, add_entitie
         if flag and not caps.get(flag, True):
             _LOGGER.debug("button %s skipped (capability flag %s=False)", key, flag)
             continue
+        if key == "unlock_trunk" and caps.get("tailgate.rtu"):
+            sid, params = SERVICE_TAILGATE_1_0, SERVICE_TAILGATE_1_0_PARAMS
         entities.append(GeelyTelematicsButton(hass, bundle, key, name, icon, sid, params))
 
     # Manual "Refresh now" - forces an immediate poll, bypassing the back-off.

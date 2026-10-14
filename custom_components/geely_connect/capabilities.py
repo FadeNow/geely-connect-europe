@@ -85,7 +85,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
       gclean.enabled
       window_vent.enabled, window_vent.duration_s
       steering_wheel_heat.enabled
-      tailgate.enabled
+      tailgate.enabled, tailgate.rtu (bool - unlock the trunk with RTU, not RDU_2)
       lock.enabled, unlock.enabled, unlock.targets (list of accepted targets)
       sunroof.enabled, sunshade.enabled, windows.enabled
       find_car.enabled
@@ -208,6 +208,12 @@ def parse(items: list[dict]) -> dict[str, Any]:
     # and cost that finding - see the test that pins this.
     if enabled("remote_control_open_2"):
         out["tailgate.enabled"] = True
+    # Which request the Unlock Trunk button sends. The 2.0 unlock row keeps
+    # RDU_2 target=trunk, as on every EX5 and Starray. A catalogue without it
+    # and with the 1.0 trunk row gets `RTU`, which is what an E2's own app
+    # sends (#72); there, RDU_2 unlocks the whole car whatever the target.
+    if not enabled("remote_control_unlock_2") and enabled("remote_trunk_unlock"):
+        out["tailgate.rtu"] = True
     if enabled("remote_control_skylight_2"):
         out["sunroof.enabled"] = True
     if enabled("remote_control_curtain_2"):

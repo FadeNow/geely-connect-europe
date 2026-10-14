@@ -419,6 +419,19 @@ def test_unlock_trunk_button_fires_rdu2_with_target_trunk():
     assert api.calls == [("RDU_2", [{"key": "target", "value": "trunk"}], "start", 0)]
 
 
+def test_unlock_trunk_on_a_1_0_car_fires_what_its_app_sends():
+    """An E2's app sends `RTU`, start, no parameters (#72); RDU_2 with
+    target=trunk unlocks every door on that car."""
+    _need_ha()
+    api = RecorderApi()
+    _, got = _setup_buttons(_bundle(api=api, caps={"tailgate.rtu": True}))
+    asyncio.run(_by_uid(got, "btn_unlock_trunk").async_press())
+    assert api.calls == [("RTU", [], "start", 0)]
+    # Find Car is the same request on either scheme.
+    asyncio.run(_by_uid(got, "btn_find_car").async_press())
+    assert api.calls[-1][0] == "RHL"
+
+
 def test_button_rejection_becomes_homeassistanterror():
     _need_ha()
     err = load("api").GeelyControlError("failure", "Operation failed")

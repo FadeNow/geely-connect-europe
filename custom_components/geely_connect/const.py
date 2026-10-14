@@ -383,6 +383,13 @@ SERVICE_FIND_CAR_PARAMS = [{"key": "rhl", "value": "horn-light-flash"}]
 SERVICE_TAILGATE        = "RDU_2"
 SERVICE_TAILGATE_PARAMS  = [{"key": "target", "value": "trunk"}]
 
+# The same button on a car whose catalogue speaks the 1.0 scheme. A South
+# African E2's app releases the boot with its own service, `RTU`, start, no
+# parameters (captured on the owner's phone, #72). `RDU_2` ignores `target` on
+# that car: any value, nonsense included, unlocked every door and the trunk.
+SERVICE_TAILGATE_1_0        = "RTU"
+SERVICE_TAILGATE_1_0_PARAMS: list[dict] = []
+
 # --- Climate (AVD-verified 2026-05-01) ---
 # Master serviceId for AC, defrost, seat heat, seat vent on the Android app.
 SERVICE_CLIMATE = "RCE_2"

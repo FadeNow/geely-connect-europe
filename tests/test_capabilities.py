@@ -327,3 +327,16 @@ def test_the_scheduled_trip_is_the_ex5s_only_where_the_catalogue_says_2_0():
     both = cap.parse([_entry("booking_travel_1", True), _entry("booking_travel_2", True)])
     assert both["scheduled_trip.enabled"] is True
     assert "scheduled_trip.enabled" not in cap.parse([_entry("honk_flash", True)])
+
+
+def test_an_e2_unlocks_its_trunk_with_rtu_and_an_ex5_keeps_rdu_2():
+    """An E2's app releases the boot with `RTU` (#72), and `RDU_2` unlocks the
+    whole of that car whatever its target says. The 1.0 trunk row picks RTU
+    only where the 2.0 unlock row is absent, so no EX5 or Starray moves."""
+    e2 = cap.parse([_entry("remote_lock_unlock", True), _entry("remote_trunk_unlock", True)])
+    assert e2["tailgate.rtu"] is True
+    ex5 = cap.parse([_entry("remote_control_unlock_2", True, valueEnum="door,trunk"),
+                     _entry("remote_trunk_unlock", True)])
+    assert "tailgate.rtu" not in ex5
+    assert "tailgate.rtu" not in cap.parse([_entry("remote_trunk_unlock", False)])
+    assert "tailgate.rtu" not in cap.parse([_entry("remote_lock_unlock", True)])
