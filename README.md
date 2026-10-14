@@ -515,9 +515,11 @@ on means the car will condition the pack before the scheduled departure, not
 that it is doing so now. Three sources on one car agree on the decode
 ([#4](https://github.com/YossiKon/geely-connect/issues/4)) - the app screenshot,
 the status flag, and the vendor's own schedule endpoint, whose departure time
-decodes to exactly the time the app shows. There is no switch for it yet:
-arming the schedule means writing the departure time back, and inventing that
-value would silently move it.
+decodes to exactly the time the app shows. A second car now questions it: a
+Starray EM-i read in three states (#4) had the flag follow a **one-off** trip,
+and stay off while a weekday schedule was armed with battery warming on. So it
+may report "a one-off trip is armed" rather than the battery setting. One more
+test settles it, and the sensor changes if it confirms.
 
 **Park Brake Engaged** sits beside the *Park Brake* text sensor - on/off for an
 automation, a word for a dashboard. Only the two codes real cars send are
@@ -933,9 +935,10 @@ than daily use:
   the app's own, captured on a real EX5 in both directions (#4). The car's
   current schedule is read first and sent back unchanged apart from what you
   set, so a departure is never invented - with no schedule on the car and no
-  departure given, nothing is sent. **Not yet confirmed to move a real car**:
-  judge it by the Battery Temperature Maintenance sensor and the app's own
-  Scheduled trip screen.
+  departure given, nothing is sent, and a `start` with no departure reuses the
+  car's only while it is still ahead. **Confirmed on a Starray EM-i** in both
+  directions (#4). `start` arms a one-off trip; it cannot re-arm a weekday
+  schedule set in the app. Judge it by the app's own Scheduled trip screen.
 
 > ⚠️ **A "Success" here proves nothing.** The gateway answers `code 1000` to any
 > well-formed request, including one naming a seat position the car does not

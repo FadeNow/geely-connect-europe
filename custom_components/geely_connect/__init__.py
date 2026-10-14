@@ -1069,8 +1069,9 @@ def _register_debug_service(hass: HomeAssistant) -> None:
     # command (and, when given, the departure) changed. No read, no write:
     # a control that invented a departure would silently move the owner's
     # 07:00, which is why this is not a switch. A switch would also need a
-    # readable armed/disarmed state, and slot 4 has not been captured
-    # disarmed. bizType 4 stays unreachable from fire_rapid for the same
+    # readable armed state, and the one car read armed and disarmed (#4)
+    # splits it in two: `btActive` for the weekday schedule, `btTempActive`
+    # for a one-off. bizType 4 stays unreachable from fire_rapid for the same
     # reason: there, a malformed probe would clobber the schedule.
     trip_schema = vol.Schema({
         vol.Optional("command", default="start"): vol.In(["start", "stop"]),
@@ -1118,6 +1119,19 @@ def _register_debug_service(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 "no departure to send: the car has no scheduled trip set and "
                 "none was given")
+        # A start that reuses the car's departure must reuse one still ahead.
+        # A Starray running a weekday schedule held a one-off time nine days
+        # gone in this slot (#4); sent back, it would arm a trip for a day
+        # already past. A stop carries it harmlessly: that car disarmed with it.
+        if command == "start" and departure is None:
+            try:
+                ahead = int(scheduled_ms) > dt_util.utcnow().timestamp() * 1000
+            except ValueError:
+                ahead = False
+            if not ahead:
+                raise ServiceValidationError(
+                    "the departure the car holds has already passed; give a "
+                    "departure to start the trip")
         kwargs = {
             "command": command,
             "scheduled_time_ms": scheduled_ms,

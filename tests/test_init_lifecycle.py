@@ -968,6 +968,41 @@ def test_scheduled_trip_refuses_to_invent_a_departure():
     assert (kw["ac"], kw["bw"], kw["bwl"]) == ("true", "1", "1")
 
 
+def test_scheduled_trip_start_will_not_reuse_a_departure_already_gone():
+    """A Starray on a weekday schedule held a one-off departure nine days past
+    in slot 4 (#4). A start with no departure given would have armed a trip
+    for that day; it is refused instead, and so is a value that is not a time.
+    A stop still sends the stored value - that car disarmed with exactly it -
+    and a departure still ahead is reused as before."""
+    m = _mod()
+    from homeassistant.exceptions import ServiceValidationError
+    api = _FakeApi()
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "start"}, name="set_scheduled_trip")
+    for stored in ("946684800000", "soon"):        # 1 January 2000; not a time
+        api.slot4 = {"bizType": 4, "scheduledTime": stored, "ac": "true", "bw": "1"}
+        try:
+            run()
+        except ServiceValidationError as e:
+            assert "already passed" in str(e)
+        else:
+            raise AssertionError(f"a start re-armed {stored!r}")
+    assert not [c for c in api.calls if isinstance(c, tuple)], "nothing may be sent"
+
+    api.slot4 = {"bizType": 4, "scheduledTime": "4102444800000", "ac": "true", "bw": "1"}
+    run()                                           # 1 January 2100
+    (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    assert kw["command"] == "start" and kw["scheduled_time_ms"] == "4102444800000"
+
+    api.calls.clear()
+    api.slot4 = {"bizType": 4, "scheduledTime": "946684800000", "ac": "true", "bw": "1"}
+    _, run = _service(m, {"e1": {"vin": FAKE_VIN, "api": api}},
+                      {"command": "stop"}, name="set_scheduled_trip")
+    run()
+    (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    assert kw["command"] == "stop" and kw["scheduled_time_ms"] == "946684800000"
+
+
 def test_scheduled_trip_surfaces_a_failed_read_and_an_unmapped_platform():
     m = _mod()
     from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
