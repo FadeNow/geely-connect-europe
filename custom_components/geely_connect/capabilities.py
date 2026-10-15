@@ -77,7 +77,8 @@ def parse(items: list[dict]) -> dict[str, Any]:
 
     Keys produced (all optional - missing means "not advertised"; an explicit
     False means the catalogue declared the 1.0 scheme of a feature whose
-    entity here speaks the 2.0 one, see charging below):
+    entity here speaks the 2.0 one, see charging below, or for seat.heat that
+    it lists ventilated seats and no heated ones):
       ac.enabled, ac.min, ac.max, ac.step
       ac.rce_1_0  (bool - the AC speaks the 1.0 request, RCE with `rce`)
       seat.heat.enabled, seat.heat.positions (list of seat names)
@@ -173,6 +174,17 @@ def parse(items: list[dict]) -> dict[str, Any]:
             out["defrost.enabled"] = True
         if "AC" in devs:
             out["ac.enabled"] = True
+        # Ventilated seats listed and heated ones not: the car has no heated
+        # seats. A Brazilian EX5 Max declares exactly that, and its owner says
+        # the car has none (#92); every EX5 with heated seats lists them in this
+        # row beside the ventilated ones. Its catalogue also carries an enabled
+        # `remote_seat_preheat_switch`, a 1.0 row the other EX5s lack, and that
+        # row is deliberately not read: it contradicts the 2.0 row the app
+        # uses. A catalogue that lists no seats at all keeps the permissive
+        # default.
+        if ac_source is rcc2 and seat_vent_pos and not seat_heat_pos \
+                and "seat_heat" not in devs:
+            out["seat.heat.enabled"] = False
         # combined_climate_control adds steel_wheel_heating + window_ventilation
         if ps.get("steel_wheel_heating") in ("true", "True", True):
             out["steering_wheel_heat.enabled"] = True

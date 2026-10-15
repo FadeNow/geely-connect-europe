@@ -367,3 +367,43 @@ def test_an_e2s_window_rows_get_the_1_0_request():
         out = cap.parse([_entry(row, True), _entry("remote_window_ventilate", True)])
         assert "windows.rws_1_0" not in out, row
     assert "windows.rws_1_0" not in cap.parse([_entry("remote_window_open", False)])
+
+
+def _climate_row(enable=True, **params):
+    return _entry("remote_climate_control_2", enable, valueRange="15.5|28.5",
+                  paramsJson=[{"nameKey": k, "name": k, "config": v}
+                              for k, v in params.items()])
+
+
+def test_a_catalogue_listing_only_ventilated_seats_has_no_heated_ones():
+    """A Brazilian EX5 Max lists ventilated front seats and no heated ones, and
+    its owner says the car has none (#92). Its enabled 1.0 row
+    `remote_seat_preheat_switch` is not read. EX5s with heated seats list
+    both, a car that lists no seats keeps the permissive default, and so does
+    a heat-only declaration (how the new platform's catalogue reads)."""
+    br = cap.parse([
+        _climate_row(dpt_vent_loc="front-left,front-right",
+                     seatvent_area="front-left,front-right",
+                     climate_devices="AC,seat_ventilation,defrost"),
+        _entry("remote_seat_preheat_switch", True, valueRange="1,2,3",
+               paramsJson=[{"name": "p", "config": "front-left,front-right"}]),
+    ])
+    assert br["seat.heat.enabled"] is False
+    assert br["seat.vent.enabled"] is True
+    assert br["seat.vent.positions"] == ["front-left", "front-right"]
+    both = cap.parse([_climate_row(dpt_heat_loc="front-right,front-left",
+                                   dpt_vent_loc="front-right,front-left",
+                                   climate_devices="AC,seat_heat,seat_ventilation")])
+    assert both["seat.heat.enabled"] is True and both["seat.vent.enabled"] is True
+    # Positions missing but the device list still names heated seats: no verdict.
+    listed = cap.parse([_climate_row(dpt_vent_loc="front-left",
+                                     climate_devices="AC,seat_heat,seat_ventilation")])
+    assert "seat.heat.enabled" not in listed
+    for quiet in ([_climate_row(climate_devices="AC;defrost")],
+                  [_climate_row(climate_devices="AC;defrost",
+                                dpt_heat_loc="front-left,front-right")],
+                  [_entry("remote_air_condition_switch", True, valueRange="15.5|28.5")],
+                  []):
+        assert cap.parse(quiet).get("seat.heat.enabled") is not False, quiet
+    assert "seat.vent.enabled" not in cap.parse(
+        [_climate_row(dpt_heat_loc="front-left,front-right")])
