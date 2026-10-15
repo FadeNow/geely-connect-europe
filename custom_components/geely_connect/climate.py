@@ -6,6 +6,10 @@ AVD-verified 2026-05-01:
   Temp set  → same as AC ON (single command both turns on AND sets temp)
   Defrost   → see preset handling below
 
+A car whose catalogue speaks the 1.0 scheme (an E2, captured from its app, #72):
+  AC ON / temp set → RCE / start / [{rce:"<whole C>"}], duration:60
+  AC OFF           → RCE / stop  / [{rce:"<last>"}],    duration:60
+
 Status fields (under vehicleStatus.additionalVehicleStatus.climateStatus):
   preClimateActive  → True iff AC pre-cond cycle running (the AC indicator)
   defrost           → "true" iff defrost running
@@ -70,12 +74,15 @@ from .const import (
     PRESET_NONE,
     PRESET_RAPID_COOLING,
     PRESET_RAPID_WARMING,
+    RCE_1_0_DURATION_SEC,
+    RCE_1_0_KEY,
     RCE_AC_DURATION_SEC,
     RCE_KEY_CONDITIONER,
     RCE_KEY_TEMP,
     RCE_VAL_AC,
     RCE_VAL_DEFROST,
     SERVICE_CLIMATE,
+    SERVICE_CLIMATE_1_0,
 )
 from .helpers import (
     walk as _walk,
@@ -137,6 +144,8 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         self._api = bundle["api"]
         self._vin = bundle["vin"]
         self._caps = bundle.get("capabilities") or {}
+        # Which AC request this car's catalogue speaks - see _fire_ac.
+        self._scheme_1_0 = bool(self._caps.get("ac.rce_1_0"))
 
         # Capability-driven bounds (fall back to const defaults).
         self._attr_min_temp = float(self._caps.get("ac.min", CLIMATE_MIN_TEMP_C))
@@ -244,7 +253,9 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
                       self._cached_target_temp)
 
     def _clamp_temp(self, value: float) -> float:
-        return max(self._attr_min_temp, min(self._attr_max_temp, value))
+        value = max(self._attr_min_temp, min(self._attr_max_temp, value))
+        # The 1.0 request carries whole degrees only, as its app sends them.
+        return float(round(value)) if self._scheme_1_0 else value
 
     # ---- read state ----
 
@@ -315,24 +326,10 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         # Fire FIRST, then apply optimistic state - so a server-rejected
         # command doesn't leave the UI showing a state the car never reached.
         if hvac_mode == HVACMode.HEAT_COOL:
-            await self._fire(
-                "start",
-                [
-                    {"key": RCE_KEY_CONDITIONER, "value": RCE_VAL_AC},
-                    {"key": RCE_KEY_TEMP, "value": _fmt_temp(self._cached_target_temp)},
-                ],
-                duration=RCE_AC_DURATION_SEC,
-            )
+            await self._fire_ac("start", self._cached_target_temp)
             self._set_optimistic(HVACMode.HEAT_COOL)
         elif hvac_mode == HVACMode.OFF:
-            await self._fire(
-                "stop",
-                [
-                    {"key": RCE_KEY_CONDITIONER, "value": RCE_VAL_AC},
-                    {"key": RCE_KEY_TEMP, "value": _fmt_temp(self._cached_target_temp)},
-                ],
-                duration=0,
-            )
+            await self._fire_ac("stop", self._cached_target_temp)
             # One command, and no optimistic Off while the defroster is still
             # running. This used to chain a second stop for the defroster, so
             # that hvac_mode - which reports HEAT_COOL for defrost as well as
@@ -366,18 +363,11 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
             return
-        clamped = max(self._attr_min_temp, min(self._attr_max_temp, float(temp)))
+        clamped = self._clamp_temp(float(temp))
         # Fire FIRST - only update cached target + optimistic action if
         # the server accepts. Avoids the UI showing a temp the car never
         # received.
-        await self._fire(
-            "start",
-            [
-                {"key": RCE_KEY_CONDITIONER, "value": RCE_VAL_AC},
-                {"key": RCE_KEY_TEMP, "value": _fmt_temp(clamped)},
-            ],
-            duration=RCE_AC_DURATION_SEC,
-        )
+        await self._fire_ac("start", clamped)
         # Optimistic action so the UI doesn't flicker through IDLE while
         # the dead-band recomputes against the not-yet-changed cabin temp.
         current = _to_float(_walk(self.coordinator.data or {}, _INTERIOR_TEMP_PATH))
@@ -539,12 +529,32 @@ class GeelyClimate(CoordinatorEntity, ClimateEntity, RestoreEntity):
         self._optimistic_hvac_mode = mode
         self._optimistic_until = time.time() + 30
 
-    async def _fire(self, command: str, params: list[dict], duration: int) -> None:
+    async def _fire_ac(self, command: str, temp: float) -> None:
+        """The AC request, in the scheme this car's catalogue speaks.
+
+        The 1.0 one is an E2 app's own (#72): one parameter, the setpoint as a
+        whole number, and duration 60 on the stop as well as the start.
+        """
+        if self._scheme_1_0:
+            await self._fire(command, [{"key": RCE_1_0_KEY, "value": str(round(temp))}],
+                             RCE_1_0_DURATION_SEC, SERVICE_CLIMATE_1_0)
+            return
+        await self._fire(
+            command,
+            [
+                {"key": RCE_KEY_CONDITIONER, "value": RCE_VAL_AC},
+                {"key": RCE_KEY_TEMP, "value": _fmt_temp(temp)},
+            ],
+            RCE_AC_DURATION_SEC if command == "start" else 0,
+        )
+
+    async def _fire(self, command: str, params: list[dict], duration: int,
+                    service_id: str = SERVICE_CLIMATE) -> None:
         # Callers set optimistic state AFTER awaiting this method, so on
         # error there's nothing to clean up here - just surface the error.
         try:
             resp = await self._hass.async_add_executor_job(
-                self._api.control, SERVICE_CLIMATE, params, command, duration,
+                self._api.control, service_id, params, command, duration,
             )
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely climate: {e.message}") from e

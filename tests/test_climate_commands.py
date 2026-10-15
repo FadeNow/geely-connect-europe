@@ -262,6 +262,28 @@ def test_turning_on_sends_ac_with_the_cached_setpoint():
     assert e.hvac_mode == HVACMode.HEAT_COOL, "optimistic state must follow"
 
 
+def test_a_1_0_car_gets_the_ac_request_its_own_app_sends():
+    """An E2's app, captured on the owner's phone (#72): RCE with the setpoint
+    as a whole number under `rce`, duration 60 on start and stop alike, and a
+    new setpoint is another start. RCE_2 is accepted there and does nothing."""
+    _ha()
+    caps = {"ac.rce_1_0": True, "ac.min": 16.0, "ac.max": 28.0, "ac.step": 1.0}
+    e, api, c = _entity(_status(interior="20"), caps=caps)
+    with _quiet_refresh(c):
+        asyncio.run(e.async_turn_on())
+        asyncio.run(e.async_set_temperature(temperature=25))
+        asyncio.run(e.async_set_temperature(temperature=16.6))   # whole degrees only
+        asyncio.run(e.async_turn_off())
+    assert api.calls == [
+        ("RCE", [{"key": "rce", "value": "22"}], "start", 60),
+        ("RCE", [{"key": "rce", "value": "25"}], "start", 60),
+        ("RCE", [{"key": "rce", "value": "17"}], "start", 60),
+        ("RCE", [{"key": "rce", "value": "17"}], "stop", 60),
+    ], api.calls
+    assert e.target_temperature == 17.0
+    assert (e.min_temp, e.max_temp, e.target_temperature_step) == (16.0, 28.0, 1.0)
+
+
 def test_turning_off_a_defrosting_car_stops_the_ac_and_says_so():
     """This test used to assert the opposite - two commands, AC then defrost -
     and in doing so enshrined a bug. The car executes one remote command at a

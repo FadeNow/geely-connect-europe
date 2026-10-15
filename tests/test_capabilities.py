@@ -340,3 +340,30 @@ def test_an_e2_unlocks_its_trunk_with_rtu_and_an_ex5_keeps_rdu_2():
     assert "tailgate.rtu" not in ex5
     assert "tailgate.rtu" not in cap.parse([_entry("remote_trunk_unlock", False)])
     assert "tailgate.rtu" not in cap.parse([_entry("remote_lock_unlock", True)])
+
+
+def test_an_e2s_ac_row_gets_the_1_0_request_in_whole_degrees():
+    """An E2 declares its AC only as `remote_air_condition_switch` (15.5|28.5)
+    and its app sends RCE with whole degrees (#72). The 2.0 climate row keeps
+    its own request and bounds wherever it is declared."""
+    e2 = cap.parse([_entry("remote_air_condition_switch", True, valueRange="15.5|28.5")])
+    assert e2["ac.enabled"] is True and e2["ac.rce_1_0"] is True
+    assert (e2["ac.min"], e2["ac.max"], e2["ac.step"]) == (16.0, 28.0, 1.0)
+    for junk in (None, "", "cold|hot", "15|20|25"):
+        out = cap.parse([_entry("remote_air_condition_switch", True, valueRange=junk)])
+        assert out["ac.rce_1_0"] is True and "ac.min" not in out, junk
+    ex5 = cap.parse([_entry("remote_climate_control_2", True, valueRange="15.5|28.5"),
+                     _entry("remote_air_condition_switch", True, valueRange="15.5|28.5")])
+    assert "ac.rce_1_0" not in ex5 and ex5["ac.min"] == 15.5
+    assert "ac.rce_1_0" not in cap.parse([_entry("remote_air_condition_switch", False)])
+
+
+def test_an_e2s_window_rows_get_the_1_0_request():
+    """An E2 declares its windows as `remote_window_open/close/ventilate`, and
+    its app sends RWS with `rws` (#72). A 2.0 window row keeps RWS_2."""
+    for row in ("remote_window_open", "remote_window_close", "remote_window_ventilate"):
+        assert cap.parse([_entry(row, True)])["windows.rws_1_0"] is True, row
+    for row in ("remote_control_window_2", "remote_control_ventilate_2"):
+        out = cap.parse([_entry(row, True), _entry("remote_window_ventilate", True)])
+        assert "windows.rws_1_0" not in out, row
+    assert "windows.rws_1_0" not in cap.parse([_entry("remote_window_open", False)])

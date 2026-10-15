@@ -408,6 +408,15 @@ SEAT_REAR_RIGHT     = "rear-right"
 RCE_DURATION_SECONDS = 90    # default duration for seat features (matches AVD)
 RCE_AC_DURATION_SEC = 180    # default duration for AC (matches AVD)
 
+# The AC on a car whose catalogue speaks the 1.0 scheme. A South African E2's
+# app, captured on the owner's phone (#72): `RCE` with one parameter, `rce`,
+# carrying the setpoint as a whole number ("17", "22", "25"); start turns the
+# AC on or changes the setpoint, stop turns it off with the same parameter,
+# and both carry duration 60. RCE_2 is accepted on that car and does nothing.
+SERVICE_CLIMATE_1_0 = "RCE"
+RCE_1_0_KEY         = "rce"
+RCE_1_0_DURATION_SEC = 60
+
 # --- G-clean (AVD-verified) - ventilation pulse, ~6s/burst ---
 # Reuses serviceId RCC_2 (different from RCE_2). Param value "cabin".
 SERVICE_GCLEAN          = "RCC_2"
@@ -460,6 +469,16 @@ RCE_STEERING_DURATION_SEC = 48
 # --- Window / sunshade / sunroof / ventilate (verified) ---
 SERVICE_WINDOW = "RWS_2"
 SERVICE_WINDOW_VENT_PARAMS = [{"key": "target", "value": "ventilate"}]
+
+# The windows in the 1.0 scheme, from the same E2 app (#72): `RWS` with one
+# parameter, `rws`. Down is start `window`, up is stop `all`, and ventilation
+# is start and stop `ventilate`. RWS_2, and bare RWS with `target`, were
+# forwarded to that car and never carried out.
+SERVICE_WINDOW_1_0 = "RWS"
+RWS_1_0_KEY        = "rws"
+RWS_1_0_OPEN       = "window"
+RWS_1_0_CLOSE      = "all"
+RWS_1_0_VENT       = "ventilate"
 
 # --- Charging (AVD-verified 2026-05-01) ---
 SERVICE_CHARGING            = "RCS"

@@ -328,6 +328,25 @@ def test_window_ventilation_commands_and_state():
     assert ent.is_on is False                 # all four corners closed
     climate["winStatusDriver"] = "1"
     assert ent.is_on is True                  # any corner off its stop
+
+
+def test_window_ventilation_on_a_1_0_car_sends_what_its_app_sends():
+    """An E2's app cracks the windows with RWS `rws: ventilate` start and
+    closes them with the same parameter on stop (#72). RWS_2 was forwarded to
+    that car and never carried out."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    api = _Api()
+    hass, b = _bundle(_status(climate={}), api=api, caps={"windows.rws_1_0": True})
+    ent = sw.GeelyWindowVentilationSwitch(hass, b)
+    with _patched(sw, schedule_refresh=_RefreshRec()):
+        asyncio.run(ent.async_turn_on())
+        asyncio.run(ent.async_turn_off())
+    assert api.calls == [
+        ("control", "RWS", [{"key": "rws", "value": "ventilate"}], "start", 0),
+        ("control", "RWS", [{"key": "rws", "value": "ventilate"}], "stop", 0),
+    ], api.calls
     hass2, b2 = _bundle(_status())
     assert sw.GeelyWindowVentilationSwitch(hass2, b2).is_on is None
 

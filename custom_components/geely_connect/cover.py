@@ -1,6 +1,8 @@
 """Cover entities: sunshade (sun-curtain) and all windows.
 
-Service `RWS_2` with `target=sunshade|window` - same on Geely / Zeekr.
+Service `RWS_2` with `target=sunshade|window` - same on Geely / Zeekr. A car
+whose catalogue speaks the 1.0 scheme (an E2, #72) moves its windows with `RWS`
+and `rws` instead: start `window` to open, stop `all` to close.
 
 Open and close only, and that is the whole of what the API offers rather than
 a gap in this file. The capability catalogue looks like it promises more: an
@@ -42,7 +44,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact
-from .const import DOMAIN, SERVICE_WINDOW
+from .const import (
+    DOMAIN,
+    RWS_1_0_CLOSE,
+    RWS_1_0_KEY,
+    RWS_1_0_OPEN,
+    SERVICE_WINDOW,
+    SERVICE_WINDOW_1_0,
+)
 from .helpers import (
     walk as _walk, windows_open, windows_position, schedule_refresh,
     sunroof_is_stale,
@@ -77,6 +86,7 @@ class _BaseGeelyCover(CoordinatorEntity, CoverEntity):
         self._hass = hass
         self._api = bundle["api"]
         self._vin = bundle["vin"]
+        self._caps = bundle.get("capabilities") or {}
         self._attr_unique_id = f"geely_{self._vin}_cover_{self._key}"
         self._attr_name = self._entity_name
         if self._device_class:
@@ -93,11 +103,14 @@ class _BaseGeelyCover(CoordinatorEntity, CoverEntity):
     async def async_close_cover(self, **_: Any) -> None:
         await self._fire("stop")
 
+    def _request(self, command: str) -> tuple[str, list[dict]]:
+        return SERVICE_WINDOW, [{"key": "target", "value": self._target}]
+
     async def _fire(self, command: str) -> None:
-        params = [{"key": "target", "value": self._target}]
+        service_id, params = self._request(command)
         try:
             resp = await self._hass.async_add_executor_job(
-                self._api.control, SERVICE_WINDOW, params, command,
+                self._api.control, service_id, params, command,
             )
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely cover ({self._target}): {e.message}") from e
@@ -152,6 +165,13 @@ class GeelyWindows(_BaseGeelyCover):
     _device_class = CoverDeviceClass.WINDOW
     _key = "windows"
     _entity_name = "All Windows"
+
+    def _request(self, command: str) -> tuple[str, list[dict]]:
+        # An E2's app opens with `window` and closes with `all` (#72).
+        if self._caps.get("windows.rws_1_0"):
+            value = RWS_1_0_OPEN if command == "start" else RWS_1_0_CLOSE
+            return SERVICE_WINDOW_1_0, [{"key": RWS_1_0_KEY, "value": value}]
+        return super()._request(command)
 
     @property
     def is_closed(self) -> bool | None:

@@ -8,6 +8,7 @@ AVD-verified 2026-05-01 - see docs/AVD_CAPTURE_GUIDE.md.
   Charging start/stop  → RCS / [{rcs.restart|terminate: "1"}]
                          State: statusOfChargerConnection
   Window ventilation   → RWS_2 / [{target: ventilate|window}]
+                         RWS / [{rws: ventilate}] both ways on a 1.0 car (#72)
                          State: any winStatus* != 2
   Parking Comfort      → RSM start/stop
                          State: _state.parkComfortState
@@ -60,6 +61,9 @@ from .const import (
     SERVICE_GCLEAN_PARAMS,
     SERVICE_PARKING_COMFORT,
     SERVICE_WINDOW,
+    RWS_1_0_KEY,
+    RWS_1_0_VENT,
+    SERVICE_WINDOW_1_0,
 )
 from .helpers import (
     api_can_send,
@@ -622,6 +626,9 @@ class GeelyWindowVentilationSwitch(_OptimisticHold, CoordinatorEntity, SwitchEnt
         self._hass = hass
         self._api = bundle["api"]
         self._vin = bundle["vin"]
+        # An E2's app cracks and closes them with RWS `rws: ventilate`, start
+        # and stop (#72), where RWS_2 was forwarded and never carried out.
+        self._scheme_1_0 = bool((bundle.get("capabilities") or {}).get("windows.rws_1_0"))
         self._attr_unique_id = f"geely_{self._vin}_sw_window_ventilation"
         self._attr_name = "Window Ventilation"
         self._attr_device_info = DeviceInfo(
@@ -643,9 +650,12 @@ class GeelyWindowVentilationSwitch(_OptimisticHold, CoordinatorEntity, SwitchEnt
         await self._fire("stop", [{"key": "target", "value": "window"}])
 
     async def _fire(self, command: str, params: list[dict]) -> None:
+        service_id = SERVICE_WINDOW
+        if self._scheme_1_0:
+            service_id, params = SERVICE_WINDOW_1_0, [{"key": RWS_1_0_KEY, "value": RWS_1_0_VENT}]
         try:
             resp = await self._hass.async_add_executor_job(
-                self._api.control, SERVICE_WINDOW, params, command,
+                self._api.control, service_id, params, command,
             )
         except GeelyControlError as e:
             raise HomeAssistantError(f"Geely Window Ventilation: {e.message}") from e

@@ -525,6 +525,30 @@ def test_cover_close_sends_rws2_stop_for_its_target():
         assert api.calls == [("RWS_2", [{"key": "target", "value": target}], "stop", 0)], cls_name
 
 
+def test_the_windows_on_a_1_0_car_send_what_its_app_sends():
+    """An E2's app lowers the windows with RWS start `rws: window` and raises
+    them with stop `rws: all` (#72). The roof and the blind are untouched."""
+    _need_ha()
+    cover = load("cover")
+    api = RecorderApi()
+    caps = {"windows.rws_1_0": True}
+    windows = cover.GeelyWindows(FakeHass(), _bundle(api=api, caps=caps))
+    roof = cover.GeelySunroof(FakeHass(), _bundle(api=api, caps=caps))
+    orig = cover.schedule_refresh
+    cover.schedule_refresh = lambda *a, **k: None
+    try:
+        asyncio.run(windows.async_open_cover())
+        asyncio.run(windows.async_close_cover())
+        asyncio.run(roof.async_open_cover())
+    finally:
+        cover.schedule_refresh = orig
+    assert api.calls == [
+        ("RWS", [{"key": "rws", "value": "window"}], "start", 0),
+        ("RWS", [{"key": "rws", "value": "all"}], "stop", 0),
+        ("RWS_2", [{"key": "target", "value": "sunroof"}], "start", 0),
+    ], api.calls
+
+
 def test_cover_rejection_becomes_homeassistanterror_and_skips_the_poll():
     _need_ha()
     err = load("api").GeelyControlError(1404, None)      # default message branch

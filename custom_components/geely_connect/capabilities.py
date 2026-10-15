@@ -21,6 +21,7 @@ capability response.
 # -----------------------------------------------------------------------------
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -78,6 +79,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
     False means the catalogue declared the 1.0 scheme of a feature whose
     entity here speaks the 2.0 one, see charging below):
       ac.enabled, ac.min, ac.max, ac.step
+      ac.rce_1_0  (bool - the AC speaks the 1.0 request, RCE with `rce`)
       seat.heat.enabled, seat.heat.positions (list of seat names)
       seat.vent.enabled, seat.vent.positions
       seat.alone_select  (bool - per-seat independent control supported)
@@ -88,6 +90,7 @@ def parse(items: list[dict]) -> dict[str, Any]:
       tailgate.enabled, tailgate.rtu (bool - unlock the trunk with RTU, not RDU_2)
       lock.enabled, unlock.enabled, unlock.targets (list of accepted targets)
       sunroof.enabled, sunshade.enabled, windows.enabled
+      windows.rws_1_0  (bool - windows and ventilation speak RWS with `rws`)
       find_car.enabled
       charging.enabled, parking_comfort.enabled
       scheduled_charging.enabled, scheduled_trip.enabled
@@ -180,6 +183,23 @@ def parse(items: list[dict]) -> dict[str, Any]:
                 out["window_vent.duration_s"] = int(ps.get("window_ventilation_duration", "60"))
             except ValueError:
                 pass
+    # The AC in the 1.0 scheme. An E2 declares neither climate row above, only
+    # `remote_air_condition_switch` with valueRange 15.5|28.5, and its own app
+    # sends RCE with the setpoint as a whole number (#72). So the range is cut
+    # to the whole degrees inside it, a degree at a time, and `ac.rce_1_0`
+    # tells the climate entity which request to send.
+    elif enabled("remote_air_condition_switch"):
+        out["ac.enabled"] = True
+        out["ac.rce_1_0"] = True
+        out["ac.step"] = 1.0
+        vr = by_id["remote_air_condition_switch"].get("valueRange") or ""
+        try:
+            lo, hi = (float(x) for x in vr.split("|"))
+        except ValueError:
+            pass
+        else:
+            out["ac.min"] = float(math.ceil(lo))
+            out["ac.max"] = float(math.floor(hi))
 
     # --- Bool-only features ---
     if enabled("remote_purification"):
@@ -222,6 +242,13 @@ def parse(items: list[dict]) -> dict[str, Any]:
         out["windows.enabled"] = True
     if enabled("remote_control_ventilate_2"):
         out["window_vent.enabled"] = True
+    # The windows in the 1.0 scheme: no 2.0 window row, and one of the 1.0
+    # ones an E2 declares. Its app sends RWS with an `rws` parameter (#72),
+    # where RWS_2 was forwarded and never carried out.
+    if not (enabled("remote_control_window_2") or enabled("remote_control_ventilate_2")) \
+            and any(enabled(f) for f in ("remote_window_open", "remote_window_close",
+                                         "remote_window_ventilate")):
+        out["windows.rws_1_0"] = True
     # Charging start/stop, and the one place this parser says "no" from a
     # catalogue that names a feature rather than from one that omits it.
     #
