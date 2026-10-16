@@ -270,31 +270,6 @@ def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any) 
     return len(stale)
 
 
-def _purge_undeclared_entities(hass: HomeAssistant, entry: ConfigEntry,
-                               capabilities: dict) -> int:
-    """Remove this entry's entities its catalogue says the car doesn't have.
-
-    Only on an explicit False: select.py stops creating the seat-heat selects
-    once the catalogue lists ventilated seats and no heated ones, and the ones
-    an earlier version created would otherwise linger as "no longer provided"
-    and keep their rows on the card (#92). A catalogue that failed to load, or
-    says nothing about seats, removes nothing."""
-    if capabilities.get("seat.heat.enabled") is not False:
-        return 0
-    registry = er.async_get(hass)
-    stale = [
-        e.entity_id
-        for e in er.async_entries_for_config_entry(registry, entry.entry_id)
-        if "_sel_seat_heat_" in e.unique_id
-    ]
-    for entity_id in stale:
-        registry.async_remove(entity_id)
-    if stale:
-        _LOGGER.info("Removed %d entities the car's catalogue does not declare: %s",
-                     len(stale), stale)
-    return len(stale)
-
-
 def _refresh_device_name(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Push the resolved friendly name into the device registry so the UI
     updates when the user renames the vehicle on iOS or when v1 entries
@@ -909,7 +884,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "poll_state":    poll_state,
     }
     _purge_unserved_entities(hass, entry, api)
-    _purge_undeclared_entities(hass, entry, capabilities)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload when the options flow changes the polling mode / pressure unit /
     # language, so the new choice takes effect without a restart.

@@ -321,38 +321,6 @@ def test_an_api_that_serves_everything_loses_nothing():
             assert pattern not in e.unique_id, (pattern, e.unique_id)
 
 
-def _seat_registry():
-    mk = lambda eid, uid: types.SimpleNamespace(entity_id=eid, unique_id=uid)
-    return [mk("select.heat_d", f"geely_{FAKE_VIN}_sel_seat_heat_driver"),
-            mk("select.heat_p", f"geely_{FAKE_VIN}_sel_seat_heat_passenger"),
-            mk("select.heat_rl", f"geely_{FAKE_VIN}_sel_seat_heat_rear_left"),
-            mk("select.vent_d", f"geely_{FAKE_VIN}_sel_seat_vent_driver"),
-            mk("select.vent_p", f"geely_{FAKE_VIN}_sel_seat_vent_passenger"),
-            mk("sensor.keep", f"geely_{FAKE_VIN}_battery")]
-
-
-def test_seat_heat_selects_go_when_the_catalogue_lists_none():
-    """A car whose catalogue lists ventilated seats and no heated ones (#92)
-    no longer gets the heat selects, and the ones an earlier version made
-    would stay on the card. A catalogue that says nothing removes nothing."""
-    m = _mod()
-    entry = types.SimpleNamespace(entry_id="e1")
-    reg = _EntityRegistry([])
-    with _Patched(m, er=_er_module(reg, per_entry=_seat_registry())):
-        n = m._purge_undeclared_entities(object(), entry, {"seat.heat.enabled": False})
-    assert n == 3
-    assert sorted(reg.removed) == ["select.heat_d", "select.heat_p", "select.heat_rl"]
-    for caps in ({}, {"seat.heat.enabled": True}, {"raw_count": 0}):
-        reg = _EntityRegistry([])
-        with _Patched(m, er=_er_module(reg, per_entry=_seat_registry())):
-            assert m._purge_undeclared_entities(object(), entry, caps) == 0
-        assert reg.removed == [], (caps, reg.removed)
-    reg = _EntityRegistry([])
-    with _Patched(m, er=_er_module(reg, per_entry=_seat_registry()[3:])):
-        assert m._purge_undeclared_entities(object(), entry,
-                                            {"seat.heat.enabled": False}) == 0
-
-
 # ---------------------------------------------------------------- intervals ---
 
 def test_a_broken_clock_cannot_take_the_interval_down():

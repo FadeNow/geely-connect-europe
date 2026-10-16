@@ -131,20 +131,6 @@ def test_every_unique_id_is_namespaced_by_vin():
             assert FAKE_VIN in uid, f"{uid} is not vehicle-specific"
 
 
-def test_a_car_listing_only_ventilated_seats_gets_no_heat_selects():
-    """The Brazilian EX5 Max of #92: its catalogue lists ventilated front seats
-    and no heated ones, so the card had heat rows for seats the car lacks."""
-    if not have_homeassistant():
-        skip("homeassistant not installed")
-    row = {"functionId": "remote_climate_control_2", "valueEnable": True,
-           "paramsJson": [{"nameKey": "dpt_vent_loc", "config": "front-left,front-right"},
-                          {"nameKey": "climate_devices", "config": "AC,seat_ventilation"}]}
-    caps = load("capabilities").parse([row])
-    seats = {k for k in _keys(_build_all(capabilities=caps)) if k.startswith("sel_seat_")}
-    assert seats == {"sel_seat_vent_driver", "sel_seat_vent_passenger"}, seats
-    assert {"sel_seat_heat_driver", "sel_seat_heat_passenger"} <= _keys(_build_all())
-
-
 def test_the_climate_object_id_stays_climate_despite_the_display_name():
     """The display name is "Remote Pre-Conditioning", but every shipped
     dashboard and the README adaptation procedure reference
