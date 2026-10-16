@@ -234,7 +234,10 @@ everything else.
 > fresh data is worth most. Driving means *engine running or any speed*, the same
 > test the poller uses - speed alone reads 0 at every red light, and a lock keyed
 > on it would hand the buttons back at each stop. A car that reports neither
-> field is never locked.
+> field is never locked. One exception: an E2 reports its engine running for as
+> long as remote climate runs, so with no speed, the park brake engaged and
+> remote climate on, the car counts as parked and the controls stay live,
+> Climate off included ([#72](https://github.com/YossiKon/geely-connect/issues/72)).
 
 ### 🚙 The built-in cards - zero setup
 

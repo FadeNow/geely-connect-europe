@@ -624,6 +624,8 @@
 
   const ALWAYS_WATCHED = [
     "sensor.speed", "sensor.engine_state",
+    // _isDriving's exception for remote climate on the park brake (#72).
+    "binary_sensor.park_brake_engaged", "climate.climate",
     // The propulsion split: _carState() reads these for every card, so a
     // card that did not watch them would freeze a hybrid's fuel bar and
     // headline exactly the way the door count froze once.
@@ -633,9 +635,10 @@
   ];
 
   /* Read by _carBody for the photo overlay only, so watched only when a
-   * photo is shown - a drawn card keeps its existing signature. */
+   * photo is shown - a drawn card keeps its existing signature. The overlay
+   * reads the park brake too, which every card watches for the driving lock. */
   const PHOTO_WATCHED = ["binary_sensor.charger_plug",
-    "binary_sensor.is_plugged_in", "binary_sensor.park_brake_engaged"];
+    "binary_sensor.is_plugged_in"];
 
   const ACCENT = "var(--geely-accent, #2fd6a4)";
   const AMBER = "var(--geely-warn, #e8a13a)";
@@ -1712,11 +1715,20 @@
 
     /* Is the car being driven?
      *
-     * Deliberately the same test the integration's own poller uses: engine
-     * running OR any speed. Speed alone reads 0 at every red light, so a card
-     * keyed on it would unlock its buttons at each stop; the ignition state
-     * stays on through those, and on a trim that never reports it this reduces
-     * to the speed test on its own.
+     * Engine running OR any speed, as the integration's own poller reads it.
+     * Speed alone reads 0 at every red light, so a card keyed on it would
+     * unlock its buttons at each stop; the ignition state stays on through
+     * those, and on a trim that never reports it this reduces to the speed
+     * test on its own.
+     *
+     * One exception the poller does not need: an E2 reports its engine running
+     * for as long as remote climate runs, so starting the AC from this card
+     * locked every control, including the one that turns it off (#72). With
+     * no speed, the park brake engaged and remote climate running, the car is
+     * parked; the E2 took the climate-off command in exactly that state.
+     * Remote climate ends when the car is started, and the park brake is
+     * released at a red light, so a car being driven still locks. A car that
+     * reports no park brake is unchanged.
      *
      * `sensor.engine_state` is a display value ("Running"), but a trim whose
      * raw value is not in the map passes it through unchanged, so both
@@ -1734,7 +1746,12 @@
       if (speed != null && speed > 0) return true;
       const eng = this._st("sensor.engine_state");
       const raw = eng ? String(eng.state).trim().toLowerCase() : "";
-      return DRIVING_STATES.has(raw);
+      if (!DRIVING_STATES.has(raw)) return false;
+      const brake = this._st("binary_sensor.park_brake_engaged");
+      const climate = this._st("climate.climate");
+      const preClimate = !!climate &&
+        !["off", "unavailable", "unknown"].includes(climate.state);
+      return !(brake && brake.state === "on" && preClimate);
     }
 
     /* The banner every card shows while the car is moving. Rendered by each

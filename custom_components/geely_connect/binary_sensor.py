@@ -150,7 +150,9 @@ SPECS: tuple[tuple[str, str, tuple[str, ...], BinarySensorDeviceClass | None, tu
     # a set nobody has enumerated, so a fourth code has to read unknown rather
     # than be filed as released. That was the reporter's own design (#41) and
     # it is better than the answer given first, which was to refuse the entity.
-    # 0/1 ride along from the original mapping - unproven, not disproven.
+    # 0/1 ride along from the original mapping - unproven, not disproven. An
+    # E2 sends 1 in every file from it, all parked (#72), which fits 1 for
+    # engaged; the cards' driving lock reads this entity there.
     ("park_brake_engaged",   "Park Brake Engaged", (*_SAFE, "electricParkBrakeStatus"),     None,                            ("3", 3, "1", 1), (), ("9", 9, "0", 0)),
     # Battery Temperature Maintenance, the half of #4 that had been open since
     # 4 August. It is the app's "Scheduled trip -> Battery Temperature

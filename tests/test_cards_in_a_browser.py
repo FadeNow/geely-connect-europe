@@ -65,7 +65,7 @@ window.mkHass = (opts) => {
   put(`binary_sensor.${P}_hood`, "off");
   // The climate panel - and therefore every seat control inside it - renders
   // only when the climate entity exists, which is what the seat tests need.
-  put(`climate.${P}_climate`, "off", { temperature: 22, min_temp: 15.5,
+  put(`climate.${P}_climate`, opts.climate || "off", { temperature: 22, min_temp: 15.5,
       max_temp: 28.5, target_temp_step: 0.5, preset_mode: "none" });
   if (opts.parkingComfort !== undefined) {
     put(`switch.${P}_parking_comfort`, opts.parkingComfort);
@@ -120,6 +120,9 @@ window.mkHass = (opts) => {
       state: "not_home", attributes: { latitude: opts.at[0], longitude: opts.at[1] } };
   }
   put(`sensor.${P}_engine_state`, opts.engine || "Off");
+  if (opts.parkBrake !== undefined) {
+    put(`binary_sensor.${P}_park_brake_engaged`, opts.parkBrake);
+  }
   const served = [];
   return { states: S, entities: E, devices: { d: { name: "Geely EX5" } },
            config: { country: opts.country || "IL" },
@@ -416,6 +419,60 @@ def test_a_car_stopped_at_a_light_is_still_driving():
         got = _mount(tag, _driving_probe(), speed="0", engine="Running")
         assert "Driving" in got["text"], (tag, got)
         assert got["live"] in ([], ["refresh"]), (tag, got["live"])
+
+
+def test_remote_climate_on_the_park_brake_is_not_driving():
+    """An E2 reports its engine running for as long as remote climate runs,
+    and the card locked every control - the climate-off button included -
+    the moment its AC came on (#72). No speed, the park brake engaged and
+    remote climate running is a parked car; take away any one of the three
+    and the lock stays."""
+    for tag in CARD_TAGS:
+        got = _mount(tag, _driving_probe(), speed="0", engine="Running",
+                     parkBrake="on", climate="heat_cool")
+        assert got["banner"] is False and "Driving" not in got["text"], (tag, got)
+        assert got["live"] not in ([], ["refresh"]), (tag, got["live"])
+    for opts in ({"parkBrake": "off", "climate": "heat_cool"},
+                 {"parkBrake": "on", "climate": "off"},
+                 {"parkBrake": "on", "climate": "unavailable"},
+                 {"climate": "heat_cool"},
+                 {"parkBrake": "unknown", "climate": "heat_cool"}):
+        got = _mount("geely-card", _driving_probe(), speed="0", engine="Running", **opts)
+        assert "Driving" in got["text"], (opts, got)
+        assert got["live"] in ([], ["refresh"]), (opts, got["live"])
+    got = _mount("geely-card", _driving_probe(), speed="38", engine="Running",
+                 parkBrake="on", climate="heat_cool")
+    assert "Driving" in got["text"], got
+
+
+def test_the_driving_lock_lifts_when_remote_climate_starts_on_the_park_brake():
+    """Every card has to redraw when the climate comes on or the park brake
+    moves, not only when the engine flag does - otherwise the banner would
+    stay until something else changed."""
+    script = """() => {
+        const out = [];
+        for (const tag of ["geely-card", "geely-card-strip"]) {
+            const el = document.createElement(tag);
+            document.body.appendChild(el);
+            el.setConfig({});
+            el.hass = window.mkHass({ speed: "0", engine: "Running", parkBrake: "off",
+                                      climate: "heat_cool" });
+            const a = !!el.shadowRoot.querySelector(".driving") ||
+                el.shadowRoot.textContent.includes("Driving");
+            el.hass = window.mkHass({ speed: "0", engine: "Running", parkBrake: "on",
+                                      climate: "heat_cool" });
+            const b = !!el.shadowRoot.querySelector(".driving") ||
+                el.shadowRoot.textContent.includes("Driving");
+            el.hass = window.mkHass({ speed: "0", engine: "Running", parkBrake: "on" });
+            const c = !!el.shadowRoot.querySelector(".driving") ||
+                el.shadowRoot.textContent.includes("Driving");
+            out.push([tag, a, b, c]);
+            el.remove();
+        }
+        return out;
+    }"""
+    assert _evaluate(script) == [["geely-card", True, False, True],
+                                 ["geely-card-strip", True, False, True]]
 
 
 def test_a_trim_that_never_reports_an_engine_state_falls_back_to_speed():
@@ -2067,31 +2124,40 @@ def test_a_right_facing_car_photo_mirrors_the_default_lamp_spots():
 
 
 def test_the_photo_only_states_are_watched_when_a_photo_is_shown():
-    """_carBody reads the plug and the park brake for the photo overlay only;
-    a state the card draws but does not watch freezes on screen, because the
-    render is skipped while the signature is unchanged."""
+    """_carBody reads the plug and the park brake for the photo overlay; a
+    state the card draws but does not watch freezes on screen, because the
+    render is skipped while the signature is unchanged. The new platform's
+    plug flag is watched only with a photo. The park brake is watched by
+    every card, since the driving lock reads it too (#72)."""
     got = _evaluate(r"""() => {
         const out = {};
         for (const [tag, cfg] of [["geely-card", {car_image: "x.webp"}],
                                   ["geely-card-compact", {car_image: "x.webp"}],
                                   ["geely-card", {}]]) {
-            const el = document.createElement(tag);
-            document.body.appendChild(el);
-            el.setConfig(cfg);
-            const hass = window.mkHass({});
-            hass.states["binary_sensor.car_park_brake_engaged"] =
-                { entity_id: "binary_sensor.car_park_brake_engaged", state: "on", attributes: {} };
-            el.hass = hass;
-            const before = el._signature(hass);
-            hass.states["binary_sensor.car_park_brake_engaged"].state = "off";
-            out[tag + (cfg.car_image ? "+photo" : "")] = before !== el._signature(hass);
-            el.remove();
+            for (const name of ["is_plugged_in", "park_brake_engaged"]) {
+                const el = document.createElement(tag);
+                document.body.appendChild(el);
+                el.setConfig(cfg);
+                const hass = window.mkHass({});
+                const eid = `binary_sensor.car_${name}`;
+                hass.states[eid] = { entity_id: eid, state: "on", attributes: {} };
+                el.hass = hass;
+                const before = el._signature(hass);
+                hass.states[eid].state = "off";
+                out[`${tag}${cfg.car_image ? "+photo" : ""}:${name}`] =
+                    before !== el._signature(hass);
+                el.remove();
+            }
         }
         return out;
     }""")
-    assert got["geely-card+photo"] is True, got
-    assert got["geely-card-compact+photo"] is True, got
-    assert got["geely-card"] is False, got   # a drawn card keeps its signature
+    assert got == {"geely-card+photo:is_plugged_in": True,
+                   "geely-card+photo:park_brake_engaged": True,
+                   "geely-card-compact+photo:is_plugged_in": True,
+                   "geely-card-compact+photo:park_brake_engaged": True,
+                   # a drawn card keeps its signature for the plug flag
+                   "geely-card:is_plugged_in": False,
+                   "geely-card:park_brake_engaged": True}, got
 
 
 def test_the_summary_card_makes_the_car_a_button_that_opens_the_full_card():
