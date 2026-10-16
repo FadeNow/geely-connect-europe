@@ -2017,10 +2017,12 @@
       const passengerWord = this._t("label.passenger", "Passenger");
       const seatHeatMode = this._t("label.seat_heat", "Seat heat");
       const seatCoolMode = this._t("label.seat_cooling", "Seat cooling");
-      const heatRow = seat("seat_heat_driver", driverWord, "seatheat", seatHeatMode) +
-        seat("seat_heat_passenger", passengerWord, "seatheat", seatHeatMode);
-      const ventRow = seat("seat_vent_driver", driverWord, "seatvent", seatCoolMode) +
-        seat("seat_vent_passenger", passengerWord, "seatvent", seatCoolMode);
+      const heatRow = this._hidden("seat_heating") ? ""
+        : seat("seat_heat_driver", driverWord, "seatheat", seatHeatMode) +
+          seat("seat_heat_passenger", passengerWord, "seatheat", seatHeatMode);
+      const ventRow = this._hidden("seat_cooling") ? ""
+        : seat("seat_vent_driver", driverWord, "seatvent", seatCoolMode) +
+          seat("seat_vent_passenger", passengerWord, "seatvent", seatCoolMode);
       /* Parking Comfort keeps the cabin liveable while the car sits, so it belongs
        * beside the cabin-air controls rather than among the one-shot actions.
        *
@@ -2172,6 +2174,31 @@
         }
       }
       return out.join("");
+    }
+
+    /* `hide:` on the full and top cards - a part this card leaves out (#92).
+     * An owner whose car has no heated seats and opens its tailgate by hand
+     * hides those two on their own card; nothing goes away for anyone who
+     * does not list it. Names: the action row's lock, unlock, climate,
+     * defrost, vent, trunk, find and refresh, and the climate panel's
+     * seat_heating and seat_cooling rows. An unknown name is ignored. */
+    _hidden(name) {
+      const hide = this._config.hide;
+      return Array.isArray(hide) && hide.some((h) => String(h).toLowerCase() === name);
+    }
+
+    /* The full and top cards' action row, less whatever `hide:` lists. */
+    _actionRow(s, climateOn, defrost, vent) {
+      return [
+        ["lock", () => this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })],
+        ["unlock", () => this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")],
+        ["climate", () => this._actBtn("climate", this._t("action.climate", "Climate"), "climate", { on: climateOn })],
+        ["defrost", () => this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })],
+        ["vent", () => this._actBtn("vent", this._t("action.vent", "Vent"), "vent", { on: vent && vent.state === "on" })],
+        ["trunk", () => this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })],
+        ["find", () => this._actBtn("find", this._t("action.find", "Find"), "find")],
+        ["refresh", () => this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh")],
+      ].filter(([name]) => !this._hidden(name)).map(([, draw]) => draw()).join("");
     }
 
     _actBtn(key, label, ic, opts = {}) {
@@ -2815,14 +2842,7 @@
           <div class="carwrap">${this._carBody(s.charging ? "charging" : "")}</div>
 
           <div class="actions" style="margin-top:8px">
-            ${this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })}
-            ${this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")}
-            ${this._actBtn("climate", this._t("action.climate", "Climate"), "climate", { on: climateOn })}
-            ${this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("vent", this._t("action.vent", "Vent"), "vent", { on: vent && vent.state === "on" })}
-            ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-            ${this._actBtn("find", this._t("action.find", "Find"), "find")}
-            ${this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh")}
+            ${this._actionRow(s, climateOn, defrost, vent)}
           </div>
           ${this._navRow()}
           ${this._climatePanel()}
@@ -3307,14 +3327,7 @@
           ${this._bars(s)}
 
           <div class="actions">
-            ${this._actBtn("lock", this._t("action.lock", "Lock"), "lock", { on: s.locked && s.locked.state === "locked" })}
-            ${this._actBtn("unlock", this._t("action.unlock", "Unlock"), "unlock")}
-            ${this._actBtn("climate", this._t("action.climate", "Climate"), "climate", { on: climateOn })}
-            ${this._actBtn("defrost", this._t("action.defrost", "Defrost"), "defrost", { on: defrost && defrost.state === "on" })}
-            ${this._actBtn("vent", this._t("action.vent", "Vent"), "vent", { on: vent && vent.state === "on" })}
-            ${this._actBtn("trunk", this._bootWord(), "trunk", { title: this._bootTitle() })}
-            ${this._actBtn("find", this._t("action.find", "Find"), "find")}
-            ${this._actBtn("refresh", this._t("action.sync", "Sync"), "refresh")}
+            ${this._actionRow(s, climateOn, defrost, vent)}
           </div>
 
           <div class="carwrap">${CAR_TOP_SVG(s.charging ? "charging" : "", d)}</div>

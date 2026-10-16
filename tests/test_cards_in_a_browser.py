@@ -1012,6 +1012,43 @@ def test_the_big_cards_offer_seat_heating_and_cooling_per_seat():
         assert acts["seat_heat_passenger"]["lit"] is False, (tag, acts)
 
 
+_ACTION_ROW = """[...el.shadowRoot.querySelectorAll(".actions [data-act]")]
+    .map((b) => b.dataset.act)"""
+
+_ALL_ACTIONS = ["lock", "unlock", "climate", "defrost", "vent", "trunk", "find", "refresh"]
+
+
+def test_hide_leaves_out_only_what_it_lists():
+    """`hide:` is set per card (#92): an owner whose car has no heated seats
+    hides that row and the trunk button on their own card. With no `hide:`
+    every card draws exactly what it drew before the option."""
+    seats = {"heatDriver": "Off", "ventPassenger": "Off"}
+    for tag in ("geely-card", "geely-card-top"):
+        assert _mount(tag, _ACTION_ROW) == _ALL_ACTIONS, tag
+        got = _mount(tag, _SEAT_PROBE, seats=seats)
+        assert {b["act"] for b in got["buttons"]} == {
+            "seat_heat_driver", "seat_heat_passenger",
+            "seat_vent_driver", "seat_vent_passenger"}, (tag, got)
+
+        cfg = {"hide": ["trunk", "Seat_Heating", "no_such_part"]}
+        assert _mount(tag, _ACTION_ROW, cfg=cfg) == [
+            a for a in _ALL_ACTIONS if a != "trunk"], tag
+        got = _mount(tag, _SEAT_PROBE, cfg=cfg, seats=seats)
+        assert {b["act"] for b in got["buttons"]} == {
+            "seat_vent_driver", "seat_vent_passenger"}, (tag, got)
+        assert not any("Seat heating" in h for h in got["headings"]), (tag, got)
+        assert any("Seat cooling" in h for h in got["headings"]), (tag, got)
+
+        cfg = {"hide": ["seat_cooling", "lock", "refresh"]}
+        assert _mount(tag, _ACTION_ROW, cfg=cfg) == [
+            a for a in _ALL_ACTIONS if a not in ("lock", "refresh")], tag
+        got = _mount(tag, _SEAT_PROBE, cfg=cfg, seats=seats)
+        assert {b["act"] for b in got["buttons"]} == {
+            "seat_heat_driver", "seat_heat_passenger"}, (tag, got)
+    # Not a list: ignored, rather than hiding every name it happens to contain.
+    assert _mount("geely-card", _ACTION_ROW, cfg={"hide": "trunk"}) == _ALL_ACTIONS
+
+
 def test_a_trim_without_heated_seats_gets_no_row_at_all():
     """Better than a button that cannot do anything: the row is absent."""
     got = _mount("geely-card", _SEAT_PROBE)
