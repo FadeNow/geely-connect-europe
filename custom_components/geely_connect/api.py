@@ -265,6 +265,22 @@ def _check_control_resp(resp: dict) -> dict:
     raise GeelyControlError(code, resp.get("message"))
 
 
+def window_length(start: str, end: str) -> str:
+    """The length of a charging window as HH:MM, across midnight if need be.
+
+    How the E2's app states its window: 10:00 to 17:00 is "07:00", 23:00 to
+    07:00 is "08:00" (#72). A window that starts where it ends has no length
+    the app could have sent, so it is refused rather than sent as "00:00".
+    """
+    def minutes(hhmm: str) -> int:
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+    length = (minutes(end) - minutes(start)) % (24 * 60)
+    if not length:
+        raise ValueError("the charging window starts where it ends")
+    return f"{length // 60:02d}:{length % 60:02d}"
+
+
 # ---------- HMAC signer (proven bit-exact against iOS framework) ----------
 
 def _percent_encode_value(s: str) -> str:
@@ -1087,6 +1103,7 @@ class GeelyApi:
         Reads schedules for charge-server features:
           - bizType=4 → Parking Comfort schedule
           - bizType=6 → Scheduled Charging (rbcStartTime/rbcEndTime/rbcTarget/bcCycleActive)
+          - bizType=2 → an E2's Scheduled Charging (timerId/scheduleList, #72)
           - bizType=7 → Rapid (write-only; GET returns nothing useful)
         Returns the full response dict ({"code":"1000","data":{...}}).
         """
@@ -1131,6 +1148,41 @@ class GeelyApi:
             f"scheduled_charging {command}",
             {"start": start_time, "end": end_time, "target": rbc_target,
              "chargeModel": charge_model},
+            lambda: _check_control_resp(
+                self._authed_apis_call("POST", path, body_bytes)))
+
+    def scheduled_charging_set_slot_2(self, *, command: str, start_time: str,
+                                      end_time: str,
+                                      day: str = "1,2,3,4,5,6,7") -> dict:
+        """Scheduled charging on a car that keeps it in slot 2 (an E2, #72).
+
+        The E2's own app sends this body, captured both ways: `command`
+        start or stop, `timerId` "2" in both, and the window as a start
+        time and its length (`duration`, HH:MM) rather than a start and an
+        end. The car reads it back with an `endtime` as well, and with
+        `timerId` "1" while the schedule is on and "2" while it is off, so
+        that field is a state the server sets, not an echo of this one.
+        """
+        body = {
+            "bizType": "2",
+            "command": command,
+            "pin": "",
+            "scheduleList": [{
+                "day": day,
+                "duration": window_length(start_time, end_time),
+                "startTime": start_time,
+                "timerActivation": "1",
+            }],
+            "sessionId": "",
+            "timerId": "2",
+            "timestamp": str(int(time.time() * 1000)),
+            "vin": self.vin,
+        }
+        body_bytes = json.dumps(body, separators=(",", ":")).encode()
+        path = f"/charge-server/ecarx_charge_set/{self.vin}"
+        return self._recorded(
+            f"scheduled_charging {command}",
+            {"start": start_time, "end": end_time, "slot": "2"},
             lambda: _check_control_resp(
                 self._authed_apis_call("POST", path, body_bytes)))
 

@@ -11,6 +11,13 @@ each poll via `api.charge_server_get("6")`):
 Writes via `api.scheduled_charging_set()` - sends the full body, keeping
 the current `command` (start if scheduled charging is on, stop if off)
 so editing the time alone doesn't accidentally toggle the schedule.
+
+On a car whose catalogue puts the schedule in slot 2 (an E2, #72) both read
+the slot's own window, `startTime` and `endtime`, and a change goes out in
+the E2 app's body with the same start/stop rule. The E2's app sends its
+window only with the toggle; that a stop stores it is shown by the car's
+read-back after one, while resending start while on, or stop while off, is
+untried there.
 """
 # -----------------------------------------------------------------------------
 # Portions of this file - the reverse-engineered Geely protocol / field mappings
@@ -34,9 +41,9 @@ from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import GeelyControlError, redact
+from .api import GeelyControlError, redact, window_length
 from .const import DOMAIN
-from .helpers import api_serves, truthy as _truthy, schedule_refresh
+from .helpers import api_serves, slot_2_window, truthy as _truthy, schedule_refresh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +110,8 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         # doesn't briefly revert the displayed time.
         self._optimistic_value: dtime | None = None
         self._optimistic_until: float = 0.0
+        self._slot_2 = bool((bundle.get("capabilities") or {})
+                            .get("scheduled_charging.slot_2"))
 
     def _sched(self) -> dict:
         return (self.coordinator.data or {}).get("_scheduled_charging") or {}
@@ -116,9 +125,15 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         if (self._optimistic_value is not None
                 and time_mod.time() < self._optimistic_until):
             return self._optimistic_value
+        if self._slot_2:
+            window = slot_2_window(self._sched()) or {}
+            return _parse_hhmm(window.get("startTime" if self._kind == "start" else "endtime"))
         return _parse_hhmm(self._sched().get(self._field))
 
     async def async_set_value(self, value: dtime) -> None:
+        if self._slot_2:
+            await self._set_slot_2(value)
+            return
         sched = self._sched()
         new_start = _fmt_hhmm(value) if self._kind == "start" else (sched.get("rbcStartTime") or "23:00")
         new_end   = _fmt_hhmm(value) if self._kind == "end"   else (sched.get("rbcEndTime")   or "07:00")
@@ -163,4 +178,37 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
 
         # Server takes about 30s to propagate, so refresh at 15, 35 and 55s.
         # Delays are relative.
+        schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
+
+    async def _set_slot_2(self, value: dtime) -> None:
+        sched = self._sched()
+        window = slot_2_window(sched)
+        if window is None:
+            raise HomeAssistantError(
+                "Geely Scheduled Charging time: the car holds no charging window "
+                "yet - set the start and end once in the Geely app")
+        start = _fmt_hhmm(value) if self._kind == "start" else window["startTime"]
+        end = _fmt_hhmm(value) if self._kind == "end" else window["endtime"]
+        if start == end:
+            raise HomeAssistantError(
+                "Geely Scheduled Charging time: the start and the end can't be the same")
+        command = "start" if str(sched.get("timerId")) == "1" else "stop"
+        try:
+            resp = await self._hass.async_add_executor_job(
+                lambda: self._api.scheduled_charging_set_slot_2(
+                    command=command, start_time=start, end_time=end,
+                    day=window.get("day") or "1,2,3,4,5,6,7",
+                )
+            )
+        except GeelyControlError as e:
+            raise HomeAssistantError(f"Geely Scheduled Charging time: {e.message}") from e
+        except Exception as e:
+            _LOGGER.exception("scheduled-charging set time failed")
+            raise HomeAssistantError(f"Geely Scheduled Charging time failure: {e}") from e
+        _LOGGER.debug("Set scheduled charging %s=%s response=%s",
+                      self._kind, _fmt_hhmm(value), redact(resp))
+        self._optimistic_value = value
+        self._optimistic_until = time_mod.time() + 60
+        window.update(startTime=start, endtime=end, duration=window_length(start, end))
+        self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)

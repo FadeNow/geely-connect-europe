@@ -69,6 +69,12 @@ class _Api:
             raise self.raise_
         return {"code": "1000"}
 
+    def scheduled_charging_set_slot_2(self, *, command, start_time, end_time, day):
+        self.calls.append(("slot_2", command, start_time, end_time, day))
+        if self.raise_ is not None:
+            raise self.raise_
+        return {"code": "1000"}
+
 
 class _Coord:
     last_update_success = True
@@ -775,11 +781,11 @@ def test_hhmm_parse_and_format():
     assert t._fmt_hhmm(dtime(23, 59)) == "23:59"
 
 
-def test_an_e2_catalogue_ends_up_with_no_charging_controls_at_all():
+def test_an_e2_catalogue_gets_its_slot_2_schedule_and_no_charge_switch():
     """The chain, end to end: the 1.0-scheme rows two real E2s declare (#72)
-    go through capabilities.parse and out the other side neither the Charging
-    switch, the Scheduled Charging switch nor the two time entities exist -
-    the three controls the owner reported pressing to no effect."""
+    go through capabilities.parse, and out the other side there is no
+    Charging switch - the app has no start/stop there - while Scheduled
+    Charging and its two times exist, set up for slot 2."""
     if not have_homeassistant():
         skip("homeassistant not installed")
     cap = load("capabilities")
@@ -800,7 +806,8 @@ def test_an_e2_catalogue_ends_up_with_no_charging_controls_at_all():
     got = []
     asyncio.run(sw.async_setup_entry(hass, _Entry(), lambda e, *a, **k: got.extend(e)))
     names = sorted(type(e).__name__ for e in got)
-    assert "GeelyScheduledChargingSwitch" not in names, names
+    sched = next(e for e in got if type(e).__name__ == "GeelyScheduledChargingSwitch")
+    assert sched._slot_2 is True
     uids = [e._attr_unique_id for e in got]
     assert f"geely_{FAKE_VIN}_sw_charging" not in uids, got
     # Parking Comfort goes with them on a 1.0 catalogue - the app has no such
@@ -810,7 +817,7 @@ def test_an_e2_catalogue_ends_up_with_no_charging_controls_at_all():
     assert "GeelyWindowVentilationSwitch" in names and "GeelyDefrostSwitch" in names, names
     got = []
     asyncio.run(t.async_setup_entry(hass, _Entry(), lambda e, *a, **k: got.extend(e)))
-    assert got == [], got
+    assert [(e._kind, e._slot_2) for e in got] == [("start", True), ("end", True)], got
 
 
 def test_time_entities_skip_only_when_both_capability_flags_deny():
@@ -1005,3 +1012,135 @@ def test_the_hold_writes_state_when_the_entity_is_on_hass():
     ent._hold(True)
     ent._write_held_state()
     assert writes == [1], "the held state was not written on a live entity"
+
+
+# --------------------------------- scheduled charging in slot 2 (an E2) ---
+
+_SLOT_2_CAPS = {"scheduled_charging.enabled": True, "scheduled_charging.slot_2": True}
+
+
+def _slot_2(timer_id="1", window=True):
+    """The slot as an E2 reads it back (#72): `timerId` "1" while on."""
+    sched = {"bizType": 2, "id": 898610, "timerId": timer_id, "scheduleList": []}
+    if window:
+        sched["scheduleList"] = [{"duration": "07:00", "endtime": "17:00",
+                                  "startTime": "10:00", "timerActivation": "1",
+                                  "day": "1,2,3,4,5,6,7"}]
+    return sched
+
+
+def test_the_slot_2_switch_reads_the_timer_id_the_car_reports():
+    """`timerId` "1" while on, "2" while off; `timerActivation` reads "1" in
+    both, so it decides nothing. Anything else is unknown, not off."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    for timer_id, want in (("1", True), ("2", False), ("0", None), (None, None)):
+        hass, b = _bundle(_status(sched=_slot_2(timer_id)), caps=_SLOT_2_CAPS)
+        assert sw.GeelyScheduledChargingSwitch(hass, b).is_on is want, timer_id
+    hass, b = _bundle(_status(sched=_slot_2("1")))
+    assert sw.GeelyScheduledChargingSwitch(hass, b).is_on is False   # slot 6 rules
+
+
+def test_the_slot_2_switch_sends_the_window_the_car_holds():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    api = _Api()
+    sched = _slot_2("2")
+    hass, b = _bundle(_status(sched=sched), api=api, caps=_SLOT_2_CAPS)
+    ent = _quiet(sw.GeelyScheduledChargingSwitch(hass, b))
+    rec, clock = _RefreshRec(), _Clock()
+    with _patched(sw, schedule_refresh=rec, time=clock):
+        asyncio.run(ent.async_turn_on())
+        assert ent.is_on is True
+        asyncio.run(ent.async_turn_off())
+    assert api.calls == [("slot_2", "start", "10:00", "17:00", "1,2,3,4,5,6,7"),
+                         ("slot_2", "stop", "10:00", "17:00", "1,2,3,4,5,6,7")], api.calls
+    assert sched["timerId"] == "2" and ent._optimistic_until == clock.now + 60
+    assert rec.calls == [(15, 20, 20), (15, 20, 20)], rec.calls
+    # A window read back without `day` still goes out with every day.
+    del sched["scheduleList"][0]["day"]
+    with _patched(sw, schedule_refresh=_RefreshRec(), time=_Clock()):
+        asyncio.run(ent.async_turn_on())
+    assert api.calls[-1][-1] == "1,2,3,4,5,6,7", api.calls
+
+
+def test_the_slot_2_switch_invents_no_window_and_reports_failures():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw = load("switch")
+    api_mod = load("api")
+    for sched in (_slot_2("2", window=False),
+                  {"timerId": "2", "scheduleList": [{"startTime": "10:00"}]},
+                  {"timerId": "2", "scheduleList": ["10:00"]}):
+        api = _Api()
+        hass, b = _bundle(_status(sched=sched), api=api, caps=_SLOT_2_CAPS)
+        e = _expect_error(_quiet(sw.GeelyScheduledChargingSwitch(hass, b)).async_turn_on())
+        assert "set the start and end once in the Geely app" in str(e), e
+        assert api.calls == [], sched
+    for err, text in ((api_mod.GeelyControlError("8070", "busy"), "Geely Scheduled Charging: "),
+                      (RuntimeError("socket closed"), "failure: socket closed")):
+        hass, b = _bundle(_status(sched=_slot_2("2")), api=_Api(raise_=err), caps=_SLOT_2_CAPS)
+        ent = _quiet(sw.GeelyScheduledChargingSwitch(hass, b))
+        with _patched(sw, schedule_refresh=_RefreshRec(), time=_Clock()):
+            e = _expect_error(ent.async_turn_on())
+        assert text in str(e), e
+        assert ent._optimistic_on is None
+
+
+def test_the_slot_2_times_read_and_write_the_window():
+    """A new time goes out with the other end unchanged and the switch's
+    current command, so editing a time does not toggle the schedule."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    t = load("time")
+    for timer_id, command in (("1", "start"), ("2", "stop")):
+        api = _Api()
+        sched = _slot_2(timer_id)
+        hass, b = _bundle(_status(sched=sched), api=api, caps=_SLOT_2_CAPS)
+        start = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
+        end = _quiet(t.GeelyScheduledChargingTime(hass, b, "end"))
+        assert (start.native_value, end.native_value) == (dtime(10, 0), dtime(17, 0))
+        rec, clock = _RefreshRec(), _Clock()
+        with _patched(t, schedule_refresh=rec, time_mod=clock):
+            asyncio.run(end.async_set_value(dtime(6, 30)))
+        assert api.calls == [("slot_2", command, "10:00", "06:30", "1,2,3,4,5,6,7")], api.calls
+        assert sched["scheduleList"][0] == {
+            "duration": "20:30", "endtime": "06:30", "startTime": "10:00",
+            "timerActivation": "1", "day": "1,2,3,4,5,6,7"}, sched
+        assert end.native_value == dtime(6, 30) and rec.calls == [(15, 20, 20)]
+    api = _Api()
+    sched = _slot_2("1")
+    del sched["scheduleList"][0]["day"]
+    hass, b = _bundle(_status(sched=sched), api=api, caps=_SLOT_2_CAPS)
+    start = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
+    with _patched(t, schedule_refresh=_RefreshRec(), time_mod=_Clock()):
+        asyncio.run(start.async_set_value(dtime(23, 0)))
+    assert api.calls == [("slot_2", "start", "23:00", "17:00", "1,2,3,4,5,6,7")], api.calls
+
+
+def test_the_slot_2_times_refuse_what_the_app_could_not_send():
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    t = load("time")
+    api_mod = load("api")
+    api = _Api()
+    hass, b = _bundle(_status(sched=_slot_2("1", window=False)), api=api, caps=_SLOT_2_CAPS)
+    start = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
+    assert start.native_value is None
+    e = _expect_error(start.async_set_value(dtime(23, 0)))
+    assert "set the start and end once in the Geely app" in str(e), e
+    hass, b = _bundle(_status(sched=_slot_2("1")), api=api, caps=_SLOT_2_CAPS)
+    start = _quiet(t.GeelyScheduledChargingTime(hass, b, "start"))
+    e = _expect_error(start.async_set_value(dtime(17, 0)))
+    assert "can't be the same" in str(e), e
+    assert api.calls == []
+    for err, text in ((api_mod.GeelyControlError("8070", "busy"), "Scheduled Charging time: "),
+                      (RuntimeError("socket closed"), "time failure: socket closed")):
+        hass, b = _bundle(_status(sched=_slot_2("1")), api=_Api(raise_=err), caps=_SLOT_2_CAPS)
+        end = _quiet(t.GeelyScheduledChargingTime(hass, b, "end"))
+        with _patched(t, schedule_refresh=_RefreshRec(), time_mod=_Clock()):
+            e = _expect_error(end.async_set_value(dtime(6, 0)))
+        assert text in str(e), e
+        assert end._optimistic_value is None

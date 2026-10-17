@@ -68,6 +68,7 @@ from .const import (
 from .helpers import (
     api_can_send,
     api_serves,
+    slot_2_window,
     walk as _walk,
     steering_wheel_fitted,
     windows_open,
@@ -508,12 +509,18 @@ class GeelySteeringWheelHeatSwitch(CoordinatorEntity, SwitchEntity):
 
 
 class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
-    """Scheduled Charging on/off (charge-server bizType=6).
+    """Scheduled Charging on/off (charge-server bizType=6, or 2 on an E2).
 
     Reads `bcCycleActive` from data["_scheduled_charging"]. Writes a full
     body POST that preserves the current rbcStartTime / rbcEndTime /
     rbcTarget / rbcModel - only `command` flips. Use the time entities
     to change the schedule window.
+
+    On a car whose catalogue puts the schedule in slot 2 (an E2, #72) the
+    slot is the E2 app's own: on while it reads `timerId` "1", off while it
+    reads "2" (`timerActivation` reads "1" either way, and `chargeSts`
+    happened to follow the toggle in those files, but it is not read here).
+    The window sent is the one the slot holds; with none, nothing is sent.
 
     Note: the Geely server takes ~30 seconds to reflect a scheduled-
     charging change. We use an optimistic `is_on` for 60s after a fire
@@ -537,6 +544,8 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         )
         self._optimistic_on: bool | None = None
         self._optimistic_until: float = 0.0
+        self._slot_2 = bool((bundle.get("capabilities") or {})
+                            .get("scheduled_charging.slot_2"))
 
     def _sched(self) -> dict:
         return (self.coordinator.data or {}).get("_scheduled_charging") or {}
@@ -554,6 +563,8 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         sched = self._sched()
         if not sched:
             return None
+        if self._slot_2:
+            return {"1": True, "2": False}.get(str(sched.get("timerId")))
         v = sched.get("bcCycleActive")
         # Server only includes bcCycleActive when the schedule is
         # active. If schedule data is present but bcCycleActive is
@@ -569,6 +580,9 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         await self._fire("stop")
 
     async def _fire(self, command: str) -> None:
+        if self._slot_2:
+            await self._fire_slot_2(command)
+            return
         sched = self._sched()
         start = sched.get("rbcStartTime") or "23:00"
         end = sched.get("rbcEndTime") or "07:00"
@@ -611,6 +625,33 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         # First peek at 15s. Real confirmation usually lands at 30-35s, so
         # three tries catch it as soon as it appears without waiting out the
         # full coordinator interval. Delays are relative: 15, 35, 55.
+        schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
+
+    async def _fire_slot_2(self, command: str) -> None:
+        window = slot_2_window(self._sched())
+        if window is None:
+            raise HomeAssistantError(
+                "Geely Scheduled Charging: the car holds no charging window yet - "
+                "set the start and end once in the Geely app")
+        try:
+            resp = await self._hass.async_add_executor_job(
+                lambda: self._api.scheduled_charging_set_slot_2(
+                    command=command,
+                    start_time=window["startTime"],
+                    end_time=window["endtime"],
+                    day=window.get("day") or "1,2,3,4,5,6,7",
+                )
+            )
+        except GeelyControlError as e:
+            raise HomeAssistantError(f"Geely Scheduled Charging: {e.message}") from e
+        except Exception as e:
+            _LOGGER.exception("scheduled charging %s failed", command)
+            raise HomeAssistantError(f"Geely Scheduled Charging failure: {e}") from e
+        _LOGGER.debug("Geely scheduled-charging %s response=%s", command, redact(resp))
+        self._optimistic_on = (command == "start")
+        self._optimistic_until = time.time() + 60
+        self._sched()["timerId"] = "1" if command == "start" else "2"
+        self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
 
 

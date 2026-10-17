@@ -1491,3 +1491,73 @@ def test_a_car_with_no_readable_odometer_keeps_the_old_cadence():
     profile_n = 6      # POLL_PROFILES["normal"]["position_every"]
     assert _wakes(api) >= 12 // profile_n, "the fallback timer stopped firing"
 
+
+
+# ------------------------------------- scheduled charging in slot 2 (#72) ---
+
+_E2_SLOT_2 = {"bizType": 2, "id": 898610, "timerId": "1", "scheduleList": [
+    {"duration": "07:00", "endtime": "17:00", "startTime": "10:00",
+     "timerActivation": "1", "day": "1,2,3,4,5,6,7"}]}
+
+
+def _e2_catalogue(api):
+    api.fetch_capabilities = lambda: [
+        {"functionId": "remote_appointment_charging", "valueEnable": True,
+         "paramsJson": [{"nameKey": "remote_charge_1_chargestarttime",
+                         "config": "remote_charge_1_chargestart"}]}]
+    plain = api.charge_server_get
+
+    def get(biz):
+        if biz == "2":
+            api.calls.append("charge2")
+            return {"code": 1000, "data": dict(_E2_SLOT_2)}
+        return plain(biz)
+    api.charge_server_get = get
+
+
+def test_a_car_whose_catalogue_names_slot_2_reads_its_schedule_there():
+    """The first refresh runs before the catalogue is read, so it can only ask
+    slot 6. Once the catalogue says slot 2, slot 2 is read at once, rather than
+    the switch reading slot 6's empty answer until the next secondary poll,
+    and every secondary poll after asks slot 2."""
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=_e2_catalogue)
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    assert ok and poll["charge_slot"] == "2"
+    assert api.calls.index("charge6") < api.calls.index("charge2"), api.calls
+    assert coord.data["_scheduled_charging"] == _E2_SLOT_2
+    poll["force_secondary"] = True
+    before = api.calls.count("charge2")
+    asyncio.run(coord.refresh())
+    assert api.calls.count("charge2") == before + 1, api.calls
+    assert coord.data["_scheduled_charging"] == _E2_SLOT_2
+
+
+def test_every_other_car_keeps_reading_slot_6():
+    m = _mod()
+    ok, hass, _, api, coord, _ = _setup(m)
+    assert hass.data["geely_connect"]["e1"]["poll_state"]["charge_slot"] == "6"
+    assert "charge2" not in api.calls and "charge6" in api.calls, api.calls
+
+
+def test_the_slot_2_read_at_setup_leaves_the_data_alone_when_it_fails():
+    m = _mod()
+    hass = _Hass()
+    codes = {1000, "1000"}
+
+    def run(api, data):
+        coord = types.SimpleNamespace(data=data)
+        asyncio.run(m._read_slot_2_now(hass, api, coord, codes))
+        return coord.data
+
+    def raising(biz):
+        raise RuntimeError("socket closed")
+    keep = {"_scheduled_charging": {"bizType": 6}}
+    for get in (raising, lambda biz: {"code": "8070", "message": "busy"},
+                lambda biz: {"code": 1000, "data": "nonsense"}):
+        api = types.SimpleNamespace(charge_server_get=get)
+        assert run(api, dict(keep)) == keep
+    served = types.SimpleNamespace(serves_charge_server=False,
+                                   charge_server_get=lambda biz: 1 / 0)
+    assert run(served, dict(keep)) == keep
+    assert run(types.SimpleNamespace(charge_server_get=lambda biz: 1 / 0), None) is None

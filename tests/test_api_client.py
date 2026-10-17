@@ -1270,3 +1270,49 @@ def test_the_access_code_is_minted_by_the_backend_that_will_exchange_it():
     _scripted_mtls(a2, [{"code": 1000, "data": {"accessToken": "T", "userId": "U"}}])
     a2.refresh_jwt()
     assert seen["host"] == "m-lcmsam-eu.geely.com"
+
+
+# ------------------------------------------- scheduled charging, slot 2 ---
+
+def test_the_slot_2_schedule_goes_out_in_the_e2_apps_own_body():
+    """Captured from the E2's app both ways (#72): `timerId` "2" for start and
+    stop alike, the window as a start and its length, in the app's key order."""
+    a = _client()
+    for command, start, end, length in (("start", "23:00", "07:00", "08:00"),
+                                        ("stop", "10:00", "17:00", "07:00")):
+        box = _capture_authed(a)
+        a.scheduled_charging_set_slot_2(command=command, start_time=start, end_time=end)
+        assert box["method"] == "POST"
+        assert box["path"] == f"/charge-server/ecarx_charge_set/{FAKE_VIN}"
+        body = json.loads(box["body"])
+        assert list(body) == ["bizType", "command", "pin", "scheduleList",
+                              "sessionId", "timerId", "timestamp", "vin"], body
+        assert list(body["scheduleList"][0]) == ["day", "duration", "startTime",
+                                                 "timerActivation"], body
+        stamp = body.pop("timestamp")
+        assert stamp.isdigit() and len(stamp) == 13, stamp
+        assert body == {"bizType": "2", "command": command, "pin": "",
+                        "scheduleList": [{"day": "1,2,3,4,5,6,7", "duration": length,
+                                          "startTime": start, "timerActivation": "1"}],
+                        "sessionId": "", "timerId": "2", "vin": FAKE_VIN}, body
+    _capture_authed(a, {"code": 8070, "message": "busy"})
+    try:
+        a.scheduled_charging_set_slot_2(command="start", start_time="23:00",
+                                        end_time="07:00", day="1,2,3")
+    except api.GeelyControlError:
+        pass
+    else:
+        raise AssertionError("a refused set was taken for a success")
+
+
+def test_a_charging_window_length_crosses_midnight_and_is_never_empty():
+    assert api.window_length("10:00", "17:00") == "07:00"
+    assert api.window_length("23:00", "07:00") == "08:00"
+    assert api.window_length("22:30", "06:15") == "07:45"
+    assert api.window_length("00:00", "23:59") == "23:59"
+    try:
+        api.window_length("07:00", "07:00")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a window with no length was accepted")

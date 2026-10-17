@@ -243,22 +243,23 @@ def _ex5_remote_charge_2():
                                "config": "end_charge_switch,start_charge_switch"}])
 
 
-def test_a_catalogue_that_declares_only_the_1_0_charge_entry_says_no_switch():
+def test_a_1_0_catalogue_has_no_charge_switch_and_its_schedule_in_slot_2():
     """The E2 shape: `remote_charge_1` (a start time, not a switch) and the 1.0
     scheduled-charging params, no `_2` row. The owner confirmed the app has no
-    start/stop and that both switches here did nothing - so both read False,
-    explicitly, which is what switch.py and time.py need to skip them."""
+    start/stop, so the Charging switch reads False. The schedule is the E2
+    app's own in slot 2 (#72), so Scheduled Charging stays, flagged to use it."""
     out = cap.parse([_e2_remote_charge_1(), _e2_remote_appointment_charging(),
                      _entry("honk_flash", True), _entry("door_lock_switch_control", True)])
     assert out["charging.enabled"] is False
-    assert out["scheduled_charging.enabled"] is False
+    assert out["scheduled_charging.enabled"] is True
+    assert out["scheduled_charging.slot_2"] is True
     # And the rest of the car is untouched by the rule.
     assert out["find_car.enabled"] is True and out["lock.enabled"] is True
 
 
 def test_the_1_0_rule_fires_on_a_declared_row_even_when_it_is_disabled():
     """Declared is the marker, not enabled: a disabled 1.0 charge row is still a
-    car that speaks the 1.0 scheme, and either way there is no switch."""
+    car that speaks the 1.0 scheme, so neither slot 6 nor a switch on slot 2."""
     out = cap.parse([_entry("remote_charge_1", False,
                             paramsJson=[{"nameKey": "remote_charge_1_chargestarttime",
                                          "config": "remote_charge_1_chargestart"}]),
@@ -267,6 +268,7 @@ def test_the_1_0_rule_fires_on_a_declared_row_even_when_it_is_disabled():
                                          "config": "remote_charge_1_chargestart"}])])
     assert out["charging.enabled"] is False
     assert out["scheduled_charging.enabled"] is False
+    assert "scheduled_charging.slot_2" not in out
 
 
 def test_the_2_0_rows_win_when_a_catalogue_carries_both_schemes():
@@ -280,6 +282,7 @@ def test_the_2_0_rows_win_when_a_catalogue_carries_both_schemes():
                      _e2_remote_appointment_charging()])
     assert out["charging.enabled"] is True
     assert out["scheduled_charging.enabled"] is True
+    assert "scheduled_charging.slot_2" not in out
 
 
 def test_a_catalogue_that_names_neither_charge_scheme_stays_permissive():

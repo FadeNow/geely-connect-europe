@@ -264,6 +264,22 @@ def windows_open(data: Any) -> bool | None:
     return False if any_seen else None
 
 
+def slot_2_window(sched: Any) -> dict | None:
+    """The charging window an E2 keeps in charge-server slot 2 (#72).
+
+    The slot reads back as {timerId, scheduleList: [{startTime, endtime,
+    duration, day, timerActivation}]}. None when the slot holds no window -
+    there is then no time of the owner's to send, and none is invented.
+    """
+    windows = sched.get("scheduleList") if isinstance(sched, dict) else None
+    if not (isinstance(windows, list) and windows and isinstance(windows[0], dict)):
+        return None
+    window = windows[0]
+    if not (window.get("startTime") and window.get("endtime")):
+        return None
+    return window
+
+
 def windows_position(data: Any) -> int | None:
     """How far open the windows are, 0-100, as the most-open corner.
 

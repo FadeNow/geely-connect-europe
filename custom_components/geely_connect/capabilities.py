@@ -94,6 +94,8 @@ def parse(items: list[dict]) -> dict[str, Any]:
       find_car.enabled
       charging.enabled, parking_comfort.enabled
       scheduled_charging.enabled, scheduled_trip.enabled
+      scheduled_charging.slot_2  (bool - the schedule lives in charge-server
+                                  slot 2, in the E2 app's body, not slot 6)
       raw_count (int)
     """
     out: dict[str, Any] = {"raw_count": len(items)}
@@ -289,14 +291,22 @@ def parse(items: list[dict]) -> dict[str, Any]:
     # on both, slot 6 answers the generic empty envelope, and the 23:00-07:00
     # schedule one owner set in the app sits in slot 2 in a different shape
     # (scheduleList / timerActivation / day). He reported the switch here had
-    # no effect - it was writing a slot his car does not use. A bare
+    # no effect - it was writing a slot his car does not use. So that
+    # declaration gets `scheduled_charging.slot_2`: the switch and the time
+    # entities read and write slot 2 in the body the E2's own app sends,
+    # captured in both directions (#72). The Colombian EX2 declares the same
+    # rows, so it gets the same, untried there. A bare
     # `remote_appointment_charging` with no params, which is how an EX5
     # declares it beside the G2 row, keeps the permissive reading.
     apt = by_id.get("remote_appointment_charging") or {}
     if enabled("apt_charging_single_cycle_G2"):
         out["scheduled_charging.enabled"] = True
     elif "remote_charge_1_chargestarttime" in _params_to_dict(apt):
-        out["scheduled_charging.enabled"] = False
+        # Declared is enough to rule slot 6 out; it takes an enabled row to
+        # put a switch on slot 2.
+        out["scheduled_charging.enabled"] = enabled("remote_appointment_charging")
+        if out["scheduled_charging.enabled"]:
+            out["scheduled_charging.slot_2"] = True
     elif enabled("remote_appointment_charging"):
         out["scheduled_charging.enabled"] = True
     # The scheduled trip, by the same rule. set_scheduled_trip sends the body

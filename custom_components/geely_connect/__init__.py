@@ -237,6 +237,20 @@ def _purge_obsolete_entities(hass: HomeAssistant, entry: ConfigEntry) -> int:
     return len(to_delete)
 
 
+async def _read_slot_2_now(hass: HomeAssistant, api: Any, coordinator: Any,
+                           success_codes: set) -> None:
+    """One read of charge-server slot 2 into the coordinator's data (#72)."""
+    if not api_serves(api, "charge_server") or not isinstance(coordinator.data, dict):
+        return
+    try:
+        sc = await hass.async_add_executor_job(api.charge_server_get, "2")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("scheduled-charging slot 2 read failed (non-fatal): %s", e)
+        return
+    if sc.get("code") in success_codes and isinstance(sc.get("data"), dict):
+        coordinator.data["_scheduled_charging"] = sc["data"]
+
+
 def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any) -> int:
     """Remove this entry's entities that its api cannot feed or send for.
 
@@ -611,7 +625,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _FAILURE_TOLERANCE = 2
     fail_state = {"consecutive": 0}
     # Efficient-polling state: cycle counter, idle streak, last-change signature.
-    poll_state = {"cycle": 0, "idle": 0, "sig": None, "fix_odo": None}
+    # `charge_slot` is the charge-server slot the schedule lives in: 6, until
+    # the catalogue says 2 (an E2, #72) - read after the first refresh.
+    poll_state = {"cycle": 0, "idle": 0, "sig": None, "fix_odo": None,
+                  "charge_slot": "6"}
     # Chosen polling profile (Eco / Normal / Live) from setup.
     profile = POLL_PROFILES.get(
         # Options win over data: the polling mode can be changed after setup.
@@ -764,7 +781,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     _LOGGER.debug("vehicle_status_state non-fatal failure: %s", e)
             if api_serves(api, "charge_server"):
                 try:
-                    sc = await _call_with_retry(api.charge_server_get, "6")
+                    sc = await _call_with_retry(api.charge_server_get,
+                                                poll_state["charge_slot"])
                     if sc.get("code") in _SUCCESS_CODES and isinstance(sc.get("data"), dict):
                         data["_scheduled_charging"] = sc["data"]
                 except GeelyTLSPinError as e:
@@ -847,6 +865,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.warning("Capability fetch failed (non-fatal): %s", e)
+
+    # The first refresh read slot 6, before the catalogue could say the car
+    # keeps its schedule in slot 2. Read slot 2 now, so the switch does not
+    # sit on slot 6's empty answer until the next secondary poll.
+    if capabilities.get("scheduled_charging.slot_2"):
+        poll_state["charge_slot"] = "2"
+        await _read_slot_2_now(hass, api, coordinator, _SUCCESS_CODES)
 
     # What the car is powered by, decided once from the first refresh. Platforms
     # read this rather than each deciding for itself, so a PHEV cannot end up
