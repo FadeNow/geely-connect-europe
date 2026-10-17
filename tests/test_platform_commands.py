@@ -776,13 +776,15 @@ def test_the_refresh_button_asks_for_the_secondary_endpoints_too():
     but the main status - which turned hunting an unmapped field into a
     coin flip (#4)."""
     _need_ha()
-    poll_state = {}
+    # A press still pending from before, its one wake spent (#95).
+    poll_state = {"force_secondary": True, "force_woke": True}
     bundle = _bundle()
     bundle["poll_state"] = poll_state
     _, got = _setup_buttons(bundle)
     btn = _by_uid(got, "btn_refresh")
     asyncio.run(btn.async_press())
     assert poll_state.get("force_secondary") is True
+    assert "force_woke" not in poll_state, "a new press must be able to wake the car once"
 
 
 def test_the_refresh_button_survives_a_bundle_without_poll_state():

@@ -568,6 +568,34 @@ def test_a_refresh_press_is_spent_where_there_is_no_state_block_to_wait_for():
     assert poll.get("force_secondary") is True, "a failed state fetch must keep the press"
 
 
+def test_a_press_that_waits_wakes_the_car_once_not_on_every_poll():
+    """A press waits for the state block, so a failed fetch does not swallow
+    it - and each poll it waited through used to wake the car again for a
+    position fix. Every wake spends the 12 V battery of a parked car (#95).
+    One press, one wake; the state block is still retried each poll, and the
+    next press may wake the car once more."""
+    m = _mod()
+
+    def failing_state(api_):
+        api_.state_error = ValueError("gateway said no")
+
+    ok, hass, _, api, coord, _ = _setup(m, api_tweak=failing_state)
+    poll = hass.data["geely_connect"]["e1"]["poll_state"]
+    poll["force_secondary"] = True
+    before = (api.calls.count("position"), api.calls.count("state"))
+    for _ in range(4):
+        asyncio.run(coord.refresh())
+    assert api.calls.count("position") == before[0] + 1, api.calls
+    assert api.calls.count("state") == before[1] + 4, "the state block must still be retried"
+    assert poll.get("force_secondary") is True
+    poll.pop("force_woke")                     # what a second press does
+    asyncio.run(coord.refresh())
+    assert api.calls.count("position") == before[0] + 2, api.calls
+    api.state_error = None                     # the block arrives: press spent
+    asyncio.run(coord.refresh())
+    assert "force_secondary" not in poll and "force_woke" not in poll, poll
+
+
 def test_manual_mode_never_starts_a_timer():
     m = _mod()
     ok, _, _, _, coord, _ = _setup(m, poll_mode="manual")

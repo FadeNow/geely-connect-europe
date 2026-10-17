@@ -113,6 +113,8 @@ class GeelyRefreshButton(ButtonEntity):
         """
         if self._poll_state is not None:
             self._poll_state["force_secondary"] = True
+            # A new press may wake the car once more for a position fix (#95).
+            self._poll_state.pop("force_woke", None)
         await self._coordinator.async_refresh()
         if not self._coordinator.last_update_success:
             err = self._coordinator.last_exception

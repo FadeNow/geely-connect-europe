@@ -670,7 +670,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # so no car loses coverage by this change. It also carries the very
         # first cycle, when there is no previous snapshot to compare.
         timer_due = (not have_proof) and ((cyc - 1) % _POSITION_EVERY == 0)
-        woke = was_driving or forced or moved or timer_due
+        # One press, one wake. The press itself can stay pending - it waits for
+        # the state block, so a failed fetch does not swallow it - but each poll
+        # it waits through used to wake the car again. A car whose state block
+        # never arrived was woken on every poll until a restart (#88), and each
+        # wake spends the 12 V battery a parked car lives on (#95).
+        force_wake = forced and not poll_state.get("force_woke", False)
+        woke = was_driving or force_wake or moved or timer_due
+        if force_wake:
+            poll_state["force_woke"] = True
         if woke:
             try:
                 await _call_with_retry(api.request_position_refresh)
@@ -803,6 +811,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # fix - so every poll from then on woke it (#88).
             if "_state" in data or not serves_state:
                 poll_state.pop("force_secondary", None)
+                poll_state.pop("force_woke", None)
 
         fail_state["consecutive"] = 0
 

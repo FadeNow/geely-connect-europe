@@ -433,12 +433,14 @@ def test_a_refresh_press_forces_the_position_wake_too():
     """Refresh Data's contract is "everything, now", and in Super Eco a manual
     pull is the advertised way to a fresh GPS fix - the parked cadence is one
     wake in days. The forced flag must reach the position gate, not only the
-    secondary one, and must be read ONCE per cycle so one press cannot answer
-    two gates differently."""
+    secondary one - once per press, not on every poll the press waits through
+    (#95) - and must be read ONCE per cycle so one press cannot answer two
+    gates differently."""
     import io, os
     from conftest import PKG
     src = io.open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
-    assert "woke = was_driving or forced or moved or timer_due" in src
+    assert 'force_wake = forced and not poll_state.get("force_woke", False)' in src
+    assert "woke = was_driving or force_wake or moved or timer_due" in src
     assert src.count('poll_state.get("force_secondary", False)') == 1, (
         "forced is read twice; the two gates can disagree about one press")
 

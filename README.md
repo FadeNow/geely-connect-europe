@@ -629,7 +629,9 @@ recorded - and again if the odometer moves without the integration seeing the
 trip. A car that has not moved is never woken to be asked where it is, however
 long it sits. (A car whose odometer cannot be read keeps the old per-cycle
 cadence, and **Refresh Data** forces a fix in any mode - which is also the
-answer for a car that is towed rather than driven.)
+answer for a car that is towed rather than driven. One press wakes the car
+once: v1.53.0 kept waking it on every poll after a press on a car that has no
+state block to fetch, the new platform's, until Home Assistant restarted.)
 
 The mode is **not fixed at setup** - change it any time from **Configure** on
 the device page (see *Changing settings later* below).
