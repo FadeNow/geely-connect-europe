@@ -88,6 +88,19 @@ def test_the_country_and_poll_dropdowns_are_closed_lists():
         assert set(getattr(validator, "container", [])) == set(allowed), key
 
 
+def test_the_country_dropdown_reads_alphabetically_by_name():
+    """Grouped by backend, the list put Australia near the bottom, under the
+    APAC group, and an Australian owner looking beside Austria didn't find it
+    (#94). The order shown is the dropdown's own."""
+    cf, flow = _flow()
+    res = asyncio.run(flow.async_step_user(None))
+    marker = next(k for k in res["data_schema"].schema if str(k) == "country_code")
+    shown = list(res["data_schema"].schema[marker].container.values())
+    names = [label.split(" ", 1)[1] for label in shown]
+    assert names == sorted(names), names
+    assert names.index("Australia (AU)") + 1 == names.index("Austria (AT)"), names
+
+
 def test_a_failed_otp_send_re_renders_the_form_with_an_error():
     cf, flow = _flow()
     cf.geely_api.cidpsso_send_otp = lambda *a, **k: {"code": 500}

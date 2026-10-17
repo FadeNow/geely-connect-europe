@@ -55,7 +55,7 @@ from .const import (
     LANGUAGES,
     POLL_MODES,
     PRESSURE_UNITS,
-    SUPPORTED_COUNTRIES,
+    COUNTRY_CHOICES,
     CONF_CERT_PATH,
     CONF_CIDPSSO_TOKEN,
     CONF_COUNTRY_CODE,
@@ -269,7 +269,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_COUNTRY_CODE,
                     default=defaults.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
-                ): vol.In(SUPPORTED_COUNTRIES),
+                ): vol.In(COUNTRY_CHOICES),
                 vol.Required(CONF_PRESSURE_UNIT, default=DEFAULT_PRESSURE_UNIT): vol.In(PRESSURE_UNITS),
                 vol.Required(CONF_POLL_MODE, default=DEFAULT_POLL_MODE): vol.In(POLL_MODES),
             }),
@@ -633,7 +633,7 @@ class GeelyIntlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_COUNTRY_CODE,
                     default=defaults.get(CONF_COUNTRY_CODE) or DEFAULT_COUNTRY_CODE,
-                ): vol.In(SUPPORTED_COUNTRIES),
+                ): vol.In(COUNTRY_CHOICES),
                 vol.Required(CONF_PRESSURE_UNIT, default=defaults.get(CONF_PRESSURE_UNIT, DEFAULT_PRESSURE_UNIT)): vol.In(PRESSURE_UNITS),
                 vol.Required(CONF_POLL_MODE, default=defaults.get(CONF_POLL_MODE, DEFAULT_POLL_MODE)): vol.In(POLL_MODES),
             }),

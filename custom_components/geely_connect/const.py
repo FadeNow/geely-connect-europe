@@ -250,6 +250,12 @@ SUPPORTED_COUNTRIES: dict[str, str] = {
     "VN": "🇻🇳 Vietnam (VN)",
 }
 
+# The dropdown, as one alphabetical list by country name. Grouped by backend as
+# above, it put Australia near the bottom under the APAC group instead of
+# beside Austria, and an Australian owner didn't find it (#94).
+COUNTRY_CHOICES: dict[str, str] = dict(
+    sorted(SUPPORTED_COUNTRIES.items(), key=lambda kv: kv[1].split(" ", 1)[1]))
+
 
 def region_config(region: str | None) -> dict[str, str]:
     """Resolve an area code to its backend config.
