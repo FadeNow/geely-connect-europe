@@ -7,8 +7,8 @@ break belonged. The Bulgarian translation was the one that noticed (#91).
 
 CONTRIBUTING asks for identical key sets across the files, and nothing enforced
 that either - four of the six turned out to predate the whole new-platform
-setup flow. A translation missing a key shows English in that one field, and
-nobody who does not read the language will notice.
+setup flow, since translated. A translation missing a key shows English in
+that one field, and nobody who does not read the language will notice.
 """
 import glob
 import json
@@ -19,41 +19,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "custom_components", "geely_connect")
 TOKEN = re.compile(r"\{(\w+)\}")
 
-# The gaps that were already there when this check arrived: the new-platform
-# setup flow, the reconfigure step and the x-vin repair, which shipped in
-# English only. Home Assistant shows the English text for each of them. They
-# are listed so the debt is visible and cannot grow - a translation that fills
-# one in must take it off this list, and no new key may be left out.
-_X_VIN_REPAIR = frozenset({
-    "issues.x_vin_missing.description", "issues.x_vin_missing.title"})
-_NEW_PLATFORM = _X_VIN_REPAIR | {
-    "config.abort.reconfigure_successful",
-    "config.error.invalid_credentials",
-    "config.error.network_unreachable",
-    "config.step.platform.data.platform",
-    "config.step.platform.description",
-    "config.step.platform.title",
-    "config.step.user.data.platform",
-    "config.step.zeekr_login.data.country_code",
-    "config.step.zeekr_login.data.email",
-    "config.step.zeekr_login.data.password",
-    "config.step.zeekr_login.data.poll_mode",
-    "config.step.zeekr_login.data.pressure_unit",
-    "config.step.zeekr_login.data.store_password",
-    "config.step.zeekr_login.description",
-    "config.step.zeekr_login.title",
-    "config.step.zeekr_pick.data.vin",
-    "config.step.zeekr_pick.description",
-    "config.step.zeekr_pick.title",
-    "options.step.init.data.zeekr_enc_vin",
-}
-KNOWN_GAPS = {
-    "ar.json": _NEW_PLATFORM,
-    "fr.json": _NEW_PLATFORM,
-    "he.json": _NEW_PLATFORM,
-    "ru.json": _NEW_PLATFORM,
-    "th.json": _X_VIN_REPAIR,
-}
+# Keys a translation may still leave to English, by file. Empty: the gaps that
+# were there when this check arrived - the new-platform setup flow, the
+# reconfigure step and the x-vin repair in ar, fr, he and ru, and the repair in
+# th - are translated. Kept so a future gap is a decision someone writes down,
+# not something nobody notices.
+KNOWN_GAPS: dict[str, frozenset] = {}
 
 
 def _load(path):

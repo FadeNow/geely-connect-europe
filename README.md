@@ -1307,7 +1307,7 @@ Everything built on top of it is original work under MIT (see `LICENSE`):
 - **Computed sensors** - efficiency, trip distance, charge-completion time and
   range-at-full-charge, none of which the car reports directly
 - **Setup and upkeep** - options flow, config-entry migrations, diagnostics,
-  tyre-pressure unit choice, and five translations
+  tyre-pressure unit choice, and six translations
 - **Ready-made dashboards** - cards, views, blueprints, automations and
   home-screen widgets
 
