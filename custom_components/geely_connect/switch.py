@@ -151,13 +151,13 @@ SWITCH_DEFS: list[tuple] = [
     # field; this was the only `*State` one.
     #
     # No replacement field is known, and there may not be one: no
-    # parkComfort*Active appears in that car's 35-key payload, and
-    # charge_server_get("4") - the AVD-verified parking-comfort endpoint, which
-    # nothing currently polls - returns only a schedule (scheduleList,
-    # startTime, endTime) with no state field at all. That fits a feature
-    # activated from inside the car, where the cloud offers a schedule rather
-    # than a toggle. RSM is marked UNVERIFIED on this trim in const.py, so
-    # whether the write path does anything is untested either.
+    # parkComfort*Active appears in that car's 35-key payload, and the
+    # charge-server slot once taken for its endpoint, 4, turned out to be the
+    # app's Scheduled trip (#4) - the empty schedule it answered on that car
+    # was the generic envelope, not a Parking Comfort state. That fits a
+    # feature activated from inside the car, where the cloud offers no
+    # toggle. RSM is marked UNVERIFIED on this trim in const.py, so whether
+    # the write path does anything is untested either.
     (
         "parking_comfort", "Parking Comfort", "mdi:sleep",
         SERVICE_PARKING_COMFORT, [], [],

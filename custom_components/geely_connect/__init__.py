@@ -251,7 +251,12 @@ async def _read_slot_2_now(hass: HomeAssistant, api: Any, coordinator: Any,
         coordinator.data["_scheduled_charging"] = sc["data"]
 
 
-def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any) -> int:
+_TRIP_SENSORS = ("_bs_battery_temp_maintenance", "_bs_scheduled_trip_weekly",
+                 "_bs_scheduled_trip_one_off")
+
+
+def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any,
+                             capabilities: dict | None = None) -> int:
     """Remove this entry's entities that its api cannot feed or send for.
 
     The platforms no longer create them (see helpers.api_serves), but one
@@ -259,12 +264,19 @@ def _purge_unserved_entities(hass: HomeAssistant, entry: ConfigEntry, api: Any) 
     "no longer provided" until its owner deleted it by hand (#88). Per entry,
     and keyed on the api rather than listed in _OBSOLETE_UNIQUE_ID_PATTERNS:
     that list is global, and these are working entities on every car whose
-    api serves them."""
+    api serves them.
+
+    The three Scheduled-trip sensors read charge-server slot 4, so they go
+    with the schedule where there is no charge-server - and on a car whose
+    catalogue says its slot 4 is the 1.0 shape nobody has decoded (#72),
+    where the sensors are not built and Battery Temperature Maintenance, built
+    there by earlier versions from a status flag, would otherwise linger."""
     gone: list[str] = []
     if not api_serves(api, "charge_server"):
         gone += ["_sw_scheduled_charging", "_time_scheduled_charging_start",
-                 "_time_scheduled_charging_end", "_bs_battery_temp_maintenance",
-                 "_bs_scheduled_trip_weekly", "_bs_scheduled_trip_one_off"]
+                 "_time_scheduled_charging_end", *_TRIP_SENSORS]
+    elif (capabilities or {}).get("scheduled_trip.enabled") is False:
+        gone += _TRIP_SENSORS
     if not api_can_send(api, SERVICE_PARKING_COMFORT):
         gone.append("_sw_parking_comfort")
     if not gone:
@@ -807,7 +819,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Maintenance lives here as `bw` and nowhere in the status block:
             # an owner switched it off with the weekday schedule armed, and
             # `bw` alone went 1 -> 0 while both *Active flags held (#4).
-            if api_serves(api, "charge_server") and poll_state["read_trip"]:
+            # Settings, not activity: read on the timer's cadence and on a
+            # Refresh press, not on every poll of a charging car - a plugged-in
+            # E2 reports the charging code all day (#72), and that fast path
+            # exists for the state block and the charging schedule, which move.
+            if (api_serves(api, "charge_server") and poll_state["read_trip"]
+                    and (forced or (cyc - 1) % _SECONDARY_EVERY == 0)):
                 try:
                     st = await _call_with_retry(api.charge_server_get, "4")
                     if st.get("code") in _SUCCESS_CODES and isinstance(st.get("data"), dict):
@@ -939,7 +956,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # counter says.
         "poll_state":    poll_state,
     }
-    _purge_unserved_entities(hass, entry, api)
+    _purge_unserved_entities(hass, entry, api, capabilities)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Reload when the options flow changes the polling mode / pressure unit /
     # language, so the new choice takes effect without a restart.
@@ -1188,12 +1205,18 @@ def _register_debug_service(hass: HomeAssistant) -> None:
                 raise ServiceValidationError(
                     "the departure the car holds has already passed; give a "
                     "departure to start the trip")
+        # The captured defaults stand in only for a field the slot does not
+        # carry. `or` would also replace a 0 - every capture so far sends these
+        # as strings, and a `bw` of 0 is the toggle off (#4), not absent.
+        def _held(key: str, default: str) -> str:
+            v = current.get(key)
+            return default if v is None or v == "" else str(v)
         kwargs = {
             "command": command,
             "scheduled_time_ms": scheduled_ms,
-            "ac": str(current.get("ac") or "true"),
-            "bw": str(current.get("bw") or "1"),
-            "bwl": str(current.get("bwl") or "1"),
+            "ac": _held("ac", "true"),
+            "bw": _held("bw", "1"),
+            "bwl": _held("bwl", "1"),
         }
         resp = await _send(entry_id, f"set_scheduled_trip {command}", functools.partial(
             api.scheduled_trip_set, **kwargs))

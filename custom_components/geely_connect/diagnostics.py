@@ -45,19 +45,15 @@ _REDACT = {
 }
 
 
-# The charge-server schedule slots, read with a GET each. Only two of these
-# are known: 4 is Parking Comfort and 6 is Scheduled Charging. The rest of the
-# range is swept because two questions in the tracker are stuck on the same
-# missing fact - which slot, if any, holds a feature nobody has located:
-#
-#   #30  Parking Comfort has no readable state field anywhere in the payload,
-#        and slot 4 was captured returning a schedule (scheduleList/startTime/
-#        endTime) with no state in it - which is the evidence for "you arm it
-#        in the car". Nothing has ever polled it, so that shape rests on one
-#        capture from one car.
-#   #4   Battery Temperature Maintenance lives under "Schedule a trip" in the
-#        app, next to a comfort toggle, and has no known endpoint at all. If
-#        it is a charge-server schedule, it is in this range.
+# The charge-server schedule slots, read with a GET each. Three of these are
+# known: 4 is the app's Scheduled trip (its departure, Cabin Comfort and the
+# Battery Temperature Maintenance toggle as `bw`, read in four states on one
+# car in #4), 6 is Scheduled Charging, and 2 is where an E2 keeps its own
+# Scheduled Charging instead (#72). The rest of the range is swept because
+# Parking Comfort (#30) has no readable state anywhere in the payload - if the
+# cloud holds one, it is in a slot nobody has located. The sweep is also how
+# slot 4 was decoded: the polled copies are in the status block above, and
+# the live read here is what an owner's one-toggle-at-a-time test compares.
 #
 # 7 is left out: it is the rapid-warming write, and its GET returns nothing.
 # All of these are GETs against the vehicle's own VIN, they run only when

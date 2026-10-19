@@ -890,7 +890,7 @@ you have installed, this integration's manifest, and how long setup took - so
 | `capabilities` | The feature flags this trim advertises, as the integration derived them |
 | `capabilities_raw` | The capability catalog exactly as the server sent it. This is what answers "does this car support X at all, or is it only missing from the integration?" |
 | `status` | The full vehicle payload behind every sensor |
-| `charge_server` | The car's schedule slots, read live when you press the button. Two of them are known - Parking Comfort and Scheduled Charging - and the rest of the range is read because a feature nobody has located may be sitting in one. A slot that does not exist answers with an error, and that is recorded rather than hidden |
+| `charge_server` | The car's schedule slots, read live when you press the button. Three of them are known - the Scheduled trip (4), Scheduled Charging (6, or 2 on an E2) - and the rest of the range is read because a feature nobody has located may be sitting in one. A slot that does not exist answers with an error, and that is recorded rather than hidden |
 | `cards` | Whether the dashboard cards are being served, and from where |
 
 **What is removed:** tokens, certificates, the captcha secret, and the mTLS key

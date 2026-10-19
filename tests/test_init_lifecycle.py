@@ -303,6 +303,24 @@ def test_entities_the_api_cannot_serve_are_cleared_from_the_registry():
                                    "time.end", "time.start"], reg.removed
 
 
+def test_a_1_0_car_loses_the_scheduled_trip_sensors_and_nothing_else():
+    """Its catalogue rules slot 4 out (#72), so the three sensors are not
+    built - and the Battery Temperature Maintenance an earlier version built
+    there from a status flag must not linger as "no longer provided"."""
+    m = _mod()
+    reg = _EntityRegistry([])
+    with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
+        n = m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"),
+                                       object(), {"scheduled_trip.enabled": False})
+    assert n == 1 and reg.removed == ["binary_sensor.btm"], reg.removed
+    for caps in ({}, {"scheduled_trip.enabled": True}, None):
+        reg = _EntityRegistry([])
+        with _Patched(m, er=_er_module(reg, per_entry=_unserved_registry())):
+            n = m._purge_unserved_entities(object(), types.SimpleNamespace(entry_id="e1"),
+                                           object(), caps)
+        assert n == 0, (caps, reg.removed)
+
+
 def test_an_api_that_serves_everything_loses_nothing():
     """These are live entities on every old-platform car - the reason they are
     cleared per entry and never through the global obsolete list. A new-
@@ -969,6 +987,13 @@ def test_scheduled_trip_start_with_a_departure_sends_it_in_ha_time():
     run()
     (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
     assert (kw["ac"], kw["bw"], kw["bwl"]) == ("false", "0", "2")
+    # A 0 is the toggle off, not a field to default; only an absent or empty
+    # field takes the captured default.
+    api.slot4 = {"bizType": 4, "scheduledTime": "1", "ac": "", "bw": 0}
+    api.calls.clear()
+    run()
+    (_, kw), = [c for c in api.calls if isinstance(c, tuple)]
+    assert (kw["ac"], kw["bw"], kw["bwl"]) == ("true", "0", "1")
 
 
 def test_scheduled_trip_refuses_to_invent_a_departure():
@@ -1569,15 +1594,27 @@ def _one_zero_trip_catalogue(api):
         {"functionId": "booking_travel_1", "valueEnable": True, "paramsJson": []}]
 
 
-def test_the_scheduled_trip_is_read_on_every_secondary_poll():
+def test_the_scheduled_trip_is_read_on_the_timer_and_a_refresh_press_only():
     """Battery Temperature Maintenance is slot 4's `bw` and nowhere in the
-    status block (#4), so slot 4 is polled beside the charging schedule."""
+    status block (#4), so slot 4 is polled beside the charging schedule - on
+    the timer's cadence and a Refresh press. Not on the fast path a charging
+    car takes every poll: that is for the state block and the charging
+    schedule, which move, and a plugged-in E2 reports the charging code all
+    day (#72). The last value is carried across the polls that skip it."""
     m = _mod()
-    ok, hass, _, api, coord, _ = _setup(m)
+    ok, hass, _, api, coord, _ = _setup(m)          # cycle 1 is the timer's
+    assert ok and api.calls.count("charge4") == 1
+    api.status_results = [{"code": 1000, "data": {"vehicleStatus": {
+        "basicVehicleStatus": {"speed": "0"},
+        "additionalVehicleStatus": {"electricVehicleStatus": {
+            "statusOfChargerConnection": "3", "chargeLevel": "80"}}}}}]
+    asyncio.run(coord.refresh())                     # cycle 2, charging
+    assert api.calls.count("state") == 2 and api.calls.count("charge6") == 2, api.calls
+    assert api.calls.count("charge4") == 1, api.calls
+    assert coord.data["_scheduled_trip"]["bw"] == "1"
     hass.data["geely_connect"]["e1"]["poll_state"]["force_secondary"] = True
-    before = api.calls.count("charge4")
-    asyncio.run(coord.refresh())
-    assert ok and api.calls.count("charge4") == before + 1, api.calls
+    asyncio.run(coord.refresh())                     # cycle 3, a press
+    assert api.calls.count("charge4") == 2, api.calls
     assert coord.data["_scheduled_trip"]["bw"] == "1"
 
 
