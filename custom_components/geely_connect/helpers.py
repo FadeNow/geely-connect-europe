@@ -303,6 +303,28 @@ def windows_position(data: Any) -> int | None:
     return best
 
 
+def note_schedule_intent(coordinator, on: bool, until: float) -> None:
+    """Remember that the owner just switched Scheduled Charging on or off.
+
+    The switch holds its own optimistic state for 60 s, but the time entities
+    read the slot the coordinator holds, and a poll in between can put the
+    server's not-yet-propagated answer back there. On an E2 the slot is
+    re-read on every poll while the plug is in, so a time change made a
+    minute after switching the schedule on went out as `stop` and switched it
+    off again (#72). The intent lives on the coordinator, which outlives
+    each poll's data dict, and is read by `schedule_intent`.
+    """
+    coordinator.geely_schedule_intent = (bool(on), float(until))
+
+
+def schedule_intent(coordinator, now: float) -> bool | None:
+    """The on/off the owner last asked for, while that hold still stands."""
+    intent = getattr(coordinator, "geely_schedule_intent", None)
+    if intent is None or now >= intent[1]:
+        return None
+    return intent[0]
+
+
 def schedule_refresh(hass: HomeAssistant, coordinator, *delays: float,
                      after: Callable[[], None] | None = None) -> None:
     """Poll the car again a little after a command, without blocking the call.

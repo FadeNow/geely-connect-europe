@@ -1120,6 +1120,38 @@ def test_the_slot_2_times_read_and_write_the_window():
     assert api.calls == [("slot_2", "start", "23:00", "17:00", "1,2,3,4,5,6,7")], api.calls
 
 
+def test_a_time_change_after_a_switch_press_keeps_the_pressed_state():
+    """maknij's sequence on his E2 (#72): switch on from HA, a poll puts the
+    server's stale `timerId` "2" back, then a time change a minute later. It
+    went out as `stop` and switched the schedule off. For the switch's 60 s
+    hold the time entity sends what was pressed; after it, what the slot
+    reads. The same for slot 6, whose `bcCycleActive` lags the same way."""
+    if not have_homeassistant():
+        skip("homeassistant not installed")
+    sw, t = load("switch"), load("time")
+    cases = (
+        (_SLOT_2_CAPS, _slot_2("2"), lambda s: s.update(timerId="2"), "slot_2"),
+        ({}, {"rbcStartTime": "10:00", "rbcEndTime": "17:00"},
+         lambda s: s.pop("bcCycleActive", None), "scheduled_charging_set"),
+    )
+    for caps, sched, stale_poll, call in cases:
+        api = _Api()
+        hass, b = _bundle(_status(sched=sched), api=api, caps=caps)
+        switch = _quiet(sw.GeelyScheduledChargingSwitch(hass, b))
+        end = _quiet(t.GeelyScheduledChargingTime(hass, b, "end"))
+        clock = _Clock()
+        with _patched(sw, schedule_refresh=_RefreshRec(), time=clock), \
+                _patched(t, schedule_refresh=_RefreshRec(), time_mod=clock):
+            asyncio.run(switch.async_turn_on())
+            stale_poll(sched)                      # the re-read says still off
+            clock.now += 59
+            asyncio.run(end.async_set_value(dtime(16, 0)))
+            clock.now += 2                         # the hold has lapsed
+            asyncio.run(end.async_set_value(dtime(17, 0)))
+        sent = [(c[0], c[1] if call == "slot_2" else c[1]["command"]) for c in api.calls]
+        assert sent == [(call, "start"), (call, "start"), (call, "stop")], (caps, api.calls)
+
+
 def test_the_slot_2_times_refuse_what_the_app_could_not_send():
     if not have_homeassistant():
         skip("homeassistant not installed")

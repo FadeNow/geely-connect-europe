@@ -43,7 +43,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import GeelyControlError, redact, window_length
 from .const import DOMAIN
-from .helpers import api_serves, slot_2_window, truthy as _truthy, schedule_refresh
+from .helpers import (api_serves, schedule_intent, slot_2_window,
+                      truthy as _truthy, schedule_refresh)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,6 +117,18 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
     def _sched(self) -> dict:
         return (self.coordinator.data or {}).get("_scheduled_charging") or {}
 
+    def _is_on(self, reported: bool) -> bool:
+        """The on/off a time change is sent with: what the owner just asked
+        the switch for while its 60 s hold stands, else what the slot reads.
+
+        The slot is not enough on its own. A poll between the switch press
+        and the time change can put the server's stale answer back, and on
+        an E2 that read happens on every poll while the plug is in - so a
+        time change a minute after switching on went out as `stop` (#72).
+        """
+        intent = schedule_intent(self.coordinator, time_mod.time())
+        return reported if intent is None else intent
+
     @property
     def native_value(self) -> dtime | None:
         # Optimistic override - holds for the full 60s. Don't drop early
@@ -140,8 +153,7 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         # Preserve current on/off - if schedule is currently active,
         # command=start re-asserts it; if not active, command=stop pushes
         # times without enabling.
-        is_on = _truthy(sched.get("bcCycleActive"))
-        command = "start" if is_on else "stop"
+        command = "start" if self._is_on(_truthy(sched.get("bcCycleActive"))) else "stop"
         rbc_target = sched.get("rbcTarget") or "2"
         # GET echoes `rbcModel`; SET writes it as `chargeModel`.
         charge_model = sched.get("rbcModel") or "0"
@@ -192,7 +204,7 @@ class GeelyScheduledChargingTime(CoordinatorEntity, TimeEntity):
         if start == end:
             raise HomeAssistantError(
                 "Geely Scheduled Charging time: the start and the end can't be the same")
-        command = "start" if str(sched.get("timerId")) == "1" else "stop"
+        command = "start" if self._is_on(str(sched.get("timerId")) == "1") else "stop"
         try:
             resp = await self._hass.async_add_executor_job(
                 lambda: self._api.scheduled_charging_set_slot_2(

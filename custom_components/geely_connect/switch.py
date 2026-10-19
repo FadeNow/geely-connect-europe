@@ -68,6 +68,7 @@ from .const import (
 from .helpers import (
     api_can_send,
     api_serves,
+    note_schedule_intent,
     slot_2_window,
     walk as _walk,
     steering_wheel_fitted,
@@ -615,11 +616,13 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         self._optimistic_on = (command == "start")
         self._optimistic_until = time.time() + 60
         # Patch the coordinator's in-memory schedule too so peer entities
-        # (the time entities) see the same state.
+        # (the time entities) see the same state - and note the intent where
+        # a poll's re-read of the slot cannot erase it (#72).
         data = self.coordinator.data
         if isinstance(data, dict):
             sched = data.setdefault("_scheduled_charging", {})
             sched["bcCycleActive"] = "true" if command == "start" else "false"
+        note_schedule_intent(self.coordinator, command == "start", self._optimistic_until)
         self.async_write_ha_state()
 
         # First peek at 15s. Real confirmation usually lands at 30-35s, so
@@ -651,6 +654,7 @@ class GeelyScheduledChargingSwitch(CoordinatorEntity, SwitchEntity):
         self._optimistic_on = (command == "start")
         self._optimistic_until = time.time() + 60
         self._sched()["timerId"] = "1" if command == "start" else "2"
+        note_schedule_intent(self.coordinator, command == "start", self._optimistic_until)
         self.async_write_ha_state()
         schedule_refresh(self._hass, self.coordinator, 15, 20, 20)
 
