@@ -384,7 +384,7 @@ def test_the_login_helper_runs_the_idaas_and_tsp_legs():
     cf, flow = _flow()
 
     class _Idaas:
-        def __init__(self, country="AU"):
+        def __init__(self, country="AU", profile=None):
             pass
 
         def login_by_email_password(self, email, password):
@@ -446,3 +446,72 @@ def test_zeekr_migration_stores_the_derived_x_vin():
     res = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input()))
     assert res["type"] == "abort" and res["reason"] == "reauth_successful", res
     assert entry.data["zeekr_enc_vin"] == "DERIVED-XVIN=="
+
+
+def test_european_setup_and_reauth_load_local_keys_without_persisting_them():
+    import json
+    from pathlib import Path
+    import tempfile
+    from unittest.mock import patch
+    from test_zeekr_europe import FAKE_KEYS, FAKE_PROFILE
+
+    for reauth in (False, True):
+        cf, flow = _flow()
+        entry = _legacy_entry()
+        if reauth:
+            entry.data.update({"platform": "zeekr", "country_code": "ES"})
+            flow._reauth_entry = entry
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "geely_eu_app_keys.json").write_text(json.dumps(FAKE_KEYS))
+            with patch.object(flow.hass.config, "path", return_value=root), \
+                    patch.object(cf, "_zeekr_login_password",
+                                 return_value=_DerivingClient()) as login:
+                result = asyncio.run(flow.async_step_zeekr_login(
+                    _zeekr_login_input({"country_code": " es "})))
+            login.assert_called_once_with(
+                "user@example.com", "hunter2", "ES", FAKE_PROFILE)
+        if reauth:
+            assert result["reason"] == "reauth_successful", result
+            stored = entry.data
+        else:
+            assert result["type"] == "create_entry", result
+            stored = result["data"]
+        assert stored["country_code"] == "ES"
+        assert stored["zeekr_enc_vin"] == "DERIVED-XVIN=="
+        for value in FAKE_KEYS.values():
+            assert value not in repr(stored)
+
+
+def test_missing_or_invalid_eu_keys_show_setup_error_without_logging_in():
+    from pathlib import Path
+    import tempfile
+    from unittest.mock import patch
+
+    cf, flow = _flow()
+    with tempfile.TemporaryDirectory() as root:
+        for contents in (None, "invalid-json"):
+            if contents is not None:
+                (Path(root) / "geely_eu_app_keys.json").write_text(contents)
+            with patch.object(flow.hass.config, "path", return_value=root), \
+                    patch.object(cf, "_zeekr_login_password") as login:
+                result = asyncio.run(flow.async_step_zeekr_login(
+                    _zeekr_login_input({"country_code": "ES"})))
+            login.assert_not_called()
+            assert result["type"] == "form", result
+            assert result["errors"] == {"base": "eu_app_keys_required"}
+
+
+def test_login_helper_carries_the_local_profile_through_both_authentication_legs():
+    from unittest.mock import patch
+    from test_zeekr_europe import FAKE_PROFILE
+
+    cf, _ = _flow()
+    with patch.object(cf, "ZeekrIdaas") as idaas, \
+            patch.object(cf, "ZeekrClient") as client:
+        idaas.return_value.login_by_email_password.return_value = "fake-token"
+        result = _REAL_LOGIN_HELPER(
+            "owner@example.invalid", "fake-password", "ES", FAKE_PROFILE)
+        idaas.assert_called_once_with(country="ES", profile=FAKE_PROFILE)
+        client.assert_called_once_with(email="", password="", profile=FAKE_PROFILE)
+        assert result.country_code == "ES"
+        result.login_tsp.assert_called_once_with("fake-token")
