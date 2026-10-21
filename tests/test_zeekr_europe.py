@@ -200,11 +200,16 @@ def test_europe_vin_probe_uses_only_the_european_material_and_restores_state():
     assert client.enc_vin == "previous"
 
 
-def test_country_selection_does_not_modify_another_client():
+def test_explicit_profile_selects_servers_independently_of_country():
     eu = zc.ZeekrClient("", "", profile=FAKE_PROFILE)
     sea = zc.ZeekrClient("", "")
-    eu.country_code = "ES"
-    sea.country_code = "AU"
+    eu.country_code = "AU"
+    for country in ("AU", "GB", "ES", "FR", "DE", "NL"):
+        sea.country_code = country
+        assert sea.gateway == zc.GATEWAY
+        assert zc.ZeekrIdaas(country=country).base == f"{zc.IDAAS_GATEWAY}/{zc.IDAAS_PATH}"
+        assert zc.idaas_headers("GET", "/test", b"", country=country)["X-HMAC-ACCESS-KEY"] == zc.HMAC_ACCESS_KEY
+        assert zc.ZeekrIdaas(country=country, profile=FAKE_PROFILE).base == FAKE_PROFILE.idaas_gateway + "/" + FAKE_PROFILE.idaas_path
     assert eu.gateway == FAKE_PROFILE.tsp_gateway
     assert sea.gateway == zc.GATEWAY
     assert zc.ZeekrIdaas(country="NZ").base == f"{zc.IDAAS_GATEWAY}/{zc.IDAAS_PATH}"

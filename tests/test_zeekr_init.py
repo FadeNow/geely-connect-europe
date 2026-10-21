@@ -201,7 +201,7 @@ def test_european_entry_restores_from_the_local_file_without_storing_app_keys():
 
     m = _mod()
     entry = _zeekr_entry()
-    entry.data["country_code"] = "ES"
+    entry.data.update({"country_code": "ES", "zeekr_region": "EU"})
     hass = _Hass()
     with tempfile.TemporaryDirectory() as root:
         (Path(root) / "geely_eu_app_keys.json").write_text(json.dumps(FAKE_KEYS))
@@ -220,7 +220,7 @@ def test_european_restore_waits_for_local_keys_before_constructing_the_adapter()
     m = _mod()
     for contents in (None, "not-json"):
         entry = _zeekr_entry()
-        entry.data["country_code"] = "ES"
+        entry.data.update({"country_code": "ES", "zeekr_region": "EU"})
         hass = _Hass()
         with tempfile.TemporaryDirectory() as root:
             if contents is not None:
@@ -348,3 +348,23 @@ def test_a_dead_session_at_the_probe_is_not_reported_as_a_missing_key():
     ok, hass, entry, api = _setup_zeekr(m, api_tweak=_broken, ir=ir2)
     assert ok is True
     assert ir2.created == [] and ir2.deleted == []
+
+
+def test_old_new_app_entries_keep_sea_regardless_of_saved_country_or_local_file():
+    from unittest.mock import patch
+
+    m = _mod()
+    for country in (None, "GB", "FR", "HU", "MD", "DE", "NL", "ES", "BE", "LU", "AU"):
+        for explicit_sea in (False, True):
+            entry = _zeekr_entry()
+            if country is None:
+                entry.data.pop("country_code")
+            else:
+                entry.data["country_code"] = country
+            if explicit_sea:
+                entry.data["zeekr_region"] = "SEA"
+            with patch.object(Path, "open", side_effect=AssertionError("Must not read EU keys")):
+                ok, _, _, api = _setup_zeekr(m, entry=entry)
+            assert ok
+            assert api.kw["profile"] is None
+            assert api.kw["access_token"] == "mock-at"

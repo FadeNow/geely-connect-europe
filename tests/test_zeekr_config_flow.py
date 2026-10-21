@@ -50,6 +50,10 @@ def _flow(entries=None):
             return (entries or [None])[0]
 
         @staticmethod
+        def async_get_known_entry(entry_id):
+            return (entries or [None])[0]
+
+        @staticmethod
         def async_update_entry(entry, **kw):
             for k, v in kw.items():
                 setattr(entry, k, v)
@@ -116,6 +120,7 @@ def _zeekr_login_input(over=None):
 def _legacy_entry():
     return type("_Entry", (), {
         "entry_id": "e1",
+        "title": "Mock Geely",
         "data": {"email": "user@example.com", "vin": "LJXK0EX50N00000001",
                  "cidpsso_token": "old-token", "user_id": "old-uid",
                  "cert_path": "/certs/c.pem", "key_path": "/certs/k.pem",
@@ -459,7 +464,7 @@ def test_european_setup_and_reauth_load_local_keys_without_persisting_them():
         cf, flow = _flow()
         entry = _legacy_entry()
         if reauth:
-            entry.data.update({"platform": "zeekr", "country_code": "ES"})
+            entry.data.update({"platform": "zeekr", "country_code": "ES", "zeekr_region": "EU"})
             flow._reauth_entry = entry
         with tempfile.TemporaryDirectory() as root:
             (Path(root) / "geely_eu_app_keys.json").write_text(json.dumps(FAKE_KEYS))
@@ -467,7 +472,7 @@ def test_european_setup_and_reauth_load_local_keys_without_persisting_them():
                     patch.object(cf, "_zeekr_login_password",
                                  return_value=_DerivingClient()) as login:
                 result = asyncio.run(flow.async_step_zeekr_login(
-                    _zeekr_login_input({"country_code": " es "})))
+                    _zeekr_login_input({"country_code": " es ", "zeekr_region": "EU"})))
             login.assert_called_once_with(
                 "user@example.com", "hunter2", "ES", FAKE_PROFILE)
         if reauth:
@@ -477,6 +482,7 @@ def test_european_setup_and_reauth_load_local_keys_without_persisting_them():
             assert result["type"] == "create_entry", result
             stored = result["data"]
         assert stored["country_code"] == "ES"
+        assert stored["zeekr_region"] == "EU"
         assert stored["zeekr_enc_vin"] == "DERIVED-XVIN=="
         for value in FAKE_KEYS.values():
             assert value not in repr(stored)
@@ -495,7 +501,7 @@ def test_missing_or_invalid_eu_keys_show_setup_error_without_logging_in():
             with patch.object(flow.hass.config, "path", return_value=root), \
                     patch.object(cf, "_zeekr_login_password") as login:
                 result = asyncio.run(flow.async_step_zeekr_login(
-                    _zeekr_login_input({"country_code": "ES"})))
+                    _zeekr_login_input({"country_code": "ES", "zeekr_region": "EU"})))
             login.assert_not_called()
             assert result["type"] == "form", result
             assert result["errors"] == {"base": "eu_app_keys_required"}
@@ -515,3 +521,80 @@ def test_login_helper_carries_the_local_profile_through_both_authentication_legs
         client.assert_called_once_with(email="", password="", profile=FAKE_PROFILE)
         assert result.country_code == "ES"
         result.login_tsp.assert_called_once_with("fake-token")
+
+
+def test_default_new_app_setup_with_gb_still_logs_into_sea_without_keys():
+    from unittest.mock import patch
+
+    cf, flow = _flow()
+    form = asyncio.run(flow.async_step_zeekr_login())
+    defaults = {str(k): k.default() for k in form["data_schema"].schema
+                if str(k) in ("country_code", "zeekr_region")}
+    assert defaults == {"country_code": "GB", "zeekr_region": "SEA"}
+    with patch.object(cf, "load_region_profile", side_effect=AssertionError("No EU file needed")), \
+            patch.object(cf, "_zeekr_login_password", return_value=_DerivingClient()) as login:
+        result = asyncio.run(flow.async_step_zeekr_login(_zeekr_login_input(defaults)))
+    login.assert_called_once_with("user@example.com", "hunter2", "GB")
+    assert result["data"]["zeekr_region"] == "SEA"
+
+
+def test_reauth_and_reconfigure_remember_explicit_region_and_preserve_old_sea_entries():
+    from unittest.mock import patch
+    from test_zeekr_europe import FAKE_PROFILE
+
+    for source in ("reauth", "reconfigure"):
+        for saved_region in (None, "SEA", "EU"):
+            entry = _legacy_entry()
+            entry.data.update({"platform": "zeekr", "country_code": "GB"})
+            if saved_region is not None:
+                entry.data["zeekr_region"] = saved_region
+            cf, flow = _flow([entry])
+            flow.context = {"entry_id": "e1", "source": source}
+            if source == "reauth":
+                form = asyncio.run(flow.async_step_reauth(entry.data))
+            else:
+                form = asyncio.run(flow.async_step_reconfigure({"platform": "zeekr"}))
+            defaults = {str(k): k.default() for k in form["data_schema"].schema
+                        if str(k) == "zeekr_region"}
+            assert defaults["zeekr_region"] == (saved_region or "SEA")
+            with patch.object(cf, "load_region_profile", return_value=FAKE_PROFILE) as loader, \
+                    patch.object(cf, "_zeekr_login_password", return_value=_DerivingClient()) as login:
+                result = asyncio.run(flow.async_step_zeekr_login(
+                    _zeekr_login_input({"country_code": "GB", **defaults})))
+            if saved_region == "EU":
+                loader.assert_called_once()
+                login.assert_called_once_with("user@example.com", "hunter2", "GB", FAKE_PROFILE)
+            else:
+                loader.assert_not_called()
+                login.assert_called_once_with("user@example.com", "hunter2", "GB")
+            assert result["reason"] == source + "_successful", result
+            assert entry.data["zeekr_region"] == (saved_region or "SEA")
+
+
+def test_switching_servers_replaces_derived_vehicle_token_but_keeps_manual_override():
+    from unittest.mock import patch
+    from test_zeekr_europe import FAKE_PROFILE
+
+    for probe_result, manual in (("new-eu-token", ""), ("", ""), ("unused", "manual-token")):
+        entry = _legacy_entry()
+        entry.data.update({"platform": "zeekr", "country_code": "GB",
+                           "zeekr_enc_vin": "old-sea-token"})
+        if manual:
+            entry.options["zeekr_enc_vin"] = manual
+        cf, flow = _flow([entry])
+        flow.context = {"entry_id": "e1", "source": "reconfigure"}
+        asyncio.run(flow.async_step_reconfigure({"platform": "zeekr"}))
+        client = _DerivingClient()
+        with patch.object(cf, "load_region_profile", return_value=FAKE_PROFILE), \
+                patch.object(cf, "_zeekr_login_password", return_value=client), \
+                patch.object(client, "probe_x_vin", return_value=probe_result) as probe:
+            result = asyncio.run(flow.async_step_zeekr_login(
+                _zeekr_login_input({"country_code": "GB", "zeekr_region": "EU"})))
+        assert result["reason"] == "reconfigure_successful"
+        assert entry.data["zeekr_region"] == "EU"
+        assert entry.data.get("zeekr_enc_vin", "") == (manual or probe_result)
+        if manual:
+            probe.assert_not_called()
+            assert entry.options["zeekr_enc_vin"] == manual
+        else:
+            probe.assert_called_once()
