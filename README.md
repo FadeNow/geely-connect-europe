@@ -1052,7 +1052,10 @@ mapped" error rather than sending a guessed body to a car.
 
 **European Geely app.** Accounts using `com.geely.global` need the European
 identity and vehicle gateways, plus app keys supplied by the installation
-owner in a local file. See [European setup](docs/LOCAL-EU-KEYS.md). Discovery
+owner in a local file. Choose **Europe (requires local app keys)** in the new-app
+login's **New-app server region** field; country alone does not change servers.
+Existing new-app entries and the default selection stay on SEA.
+See [European setup](docs/LOCAL-EU-KEYS.md). Discovery
 and status reads were verified on an E2 in Spain with Android app 1.1.1;
 other European markets and remote commands still need independent validation.
 
