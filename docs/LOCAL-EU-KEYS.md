@@ -1,9 +1,9 @@
 # European Geely app setup
 
 The European `com.geely.global` app uses a different regional identity,
-vehicle gateway and app identity from the Australian/SEA app. Selecting a
-European country routes all authentication, discovery, status and renewal
-requests consistently through the European services.
+vehicle gateway and app identity from the Australian/SEA app. Explicitly selecting
+the European server routes authentication, discovery, status and renewal requests
+consistently through the European services. Account country does not select a server.
 
 This support requires app keys supplied by the installation owner. The
 repository does not provide the five European signing/encryption values,
@@ -38,9 +38,16 @@ Assistant user. Do not paste it into an issue, PR or diagnostics report.
 ## Home Assistant setup
 
 After installing the integration and restarting Home Assistant, select
-**Geely / Geely EM app (Europe / SEA)** and your account country. European
-routing applies to ES, GB, FR, HU, MD, DE, NL, BE and LU. This routing list
-comes from the app; successful operation has only been verified in Spain.
+**New Geely EM app platform (Zeekr backend) - experimental**. In its login form,
+set **New-app server region** to **Europe (requires local app keys)**, then select
+your account country. Successful operation has only been verified in Spain.
+
+The default server remains **Australia / SEA (existing new-app server)**, even
+when the country field is GB. Existing new-app entries without a saved server
+choice also stay on SEA, including entries with a European country. They do not
+need a key file. Europe is an explicit opt-in, saved separately from country and
+remembered during reauthentication and reconfiguration. To move an existing entry
+to Europe, reconfigure it and choose Europe explicitly.
 
 Enter your Geely email and password directly in Home Assistant. The new app
 requires a password, so complete its account setup on your phone first.
@@ -77,3 +84,17 @@ validation.
 Automated tests use invented keys and fake accounts to exercise regional
 signatures, login, discovery, renewal, local-file validation and isolation
 between installations. They contact no vehicle or vendor account.
+
+## Header provenance
+
+The additional EU IDaaS `Tmp-Tenant-Code` and the retained SNC `X-APP-ID` are
+based on static inspection of the owner's Android `com.geely.global` 1.1.1 app,
+not a captured login exchange. In `com.zeekr.overseas.common.utils.m.A`, the
+common header map includes `Tmp-Tenant-Code` after the region-specific setup,
+including the EU branch. In `tj.j.e`, the GEELY brand branch returns the existing
+`GEELYSEACH001M0001` application ID independently of country.
+
+These observations support retaining the values used by the experimental build;
+they do not prove either header is necessary on every EU endpoint. No fresh live
+login or forced renewal has been performed on this PR revision. SEA header
+behavior is unchanged.
