@@ -1,6 +1,6 @@
 """Zeekr-platform client for the new Geely EM backend (com.geely.global.em 1.1.0).
 
-European app profile: com.geely.global 1.1.1, selected by country for the
+European app profile: com.geely.global 1.1.1, explicitly selected in the
 new-app flow; see zeekr_regions.py and docs/LOCAL-EU-KEYS.md.
 
 Standalone, additive module: does NOT touch the existing Ecarx/APAC client.
@@ -64,7 +64,7 @@ from typing import Any
 from urllib.parse import urlparse, parse_qsl, quote
 
 from .api import redact
-from .zeekr_regions import ZeekrRegion, region_for_country
+from .zeekr_regions import ZeekrRegion
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -495,7 +495,6 @@ def idaas_headers(method: str, path: str, body: bytes, query: str = "",
                   token: str | None = None,
                   profile: ZeekrRegion | None = None) -> dict:
     xdate = xdate or _http_date_gmt()
-    profile = region_for_country(country, profile)
     access_key = profile.hmac_access_key if profile else HMAC_ACCESS_KEY
     secret = profile.hmac_secret if profile else HMAC_SECRET
     msg_client = profile.msg_client_id if profile else MSG_CLIENT_ID
@@ -575,7 +574,6 @@ class ZeekrIdaas:
     def __init__(self, gateway: str | None = None, path: str | None = None,
                  country: str = "AU", profile: ZeekrRegion | None = None):
         self.country = country.strip().upper()
-        profile = region_for_country(self.country, profile)
         self.profile = profile
         gateway = gateway or (profile.idaas_gateway if profile else IDAAS_GATEWAY)
         self.path = (path or (profile.idaas_path if profile else IDAAS_PATH)).strip("/")
@@ -712,7 +710,9 @@ class ZeekrClient:
 
     @property
     def profile(self) -> ZeekrRegion | None:
-        return region_for_country(self.country_code, self._region_profile)
+        # Country was historically ignored for routing. Only a profile loaded
+        # for an explicitly selected EU server changes this client's backend.
+        return self._region_profile
 
     @property
     def gateway(self) -> str:

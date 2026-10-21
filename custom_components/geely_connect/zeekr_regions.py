@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 import re
 
+from .const import ZEEKR_REGION_EU, ZEEKR_REGION_SEA
 
-EU_APP_COUNTRIES = frozenset({"GB", "FR", "HU", "MD", "DE", "NL", "ES", "BE", "LU"})
 KEYS_FILENAME = "geely_eu_app_keys.json"
 _FIELDS = frozenset({
     "hmac_access_key", "hmac_secret", "snc_secret", "vin_key_hex", "vin_iv_hex",
@@ -76,24 +76,12 @@ def profile_from_keys(data: object) -> ZeekrRegion:
     )
 
 
-def region_for_country(
-    country: str, profile: ZeekrRegion | None = None,
-) -> ZeekrRegion | None:
-    """Fail before contacting EU services unless the owner supplied app keys."""
-    if country.strip().upper() not in EU_APP_COUNTRIES:
+def load_region_profile(config_dir: str, region: str) -> ZeekrRegion | None:
+    """Load the explicitly selected server profile, never infer it from country."""
+    if region == ZEEKR_REGION_SEA:
         return None
-    if profile is None or profile.area != "EU":
-        raise RegionKeysError(
-            f"European setup requires {KEYS_FILENAME} in the Home Assistant "
-            "configuration directory; see docs/LOCAL-EU-KEYS.md"
-        )
-    return profile
-
-
-def load_region_profile(config_dir: str, country: str) -> ZeekrRegion | None:
-    """Load once per setup/login in an executor, never from the event loop."""
-    if country.strip().upper() not in EU_APP_COUNTRIES:
-        return None
+    if region != ZEEKR_REGION_EU:
+        raise RegionKeysError("Unsupported new-app server region")
     path = Path(config_dir) / KEYS_FILENAME
     try:
         with path.open("rb") as source:
@@ -101,8 +89,13 @@ def load_region_profile(config_dir: str, country: str) -> ZeekrRegion | None:
         if len(raw) > 4096:
             raise RegionKeysError("Local EU app keys file is too large")
         data = json.loads(raw)
+    except RegionKeysError:
+        raise
     except FileNotFoundError:
-        return region_for_country(country)  # raises a safe, actionable error
+        raise RegionKeysError(
+            f"European setup requires {KEYS_FILENAME} in the Home Assistant "
+            "configuration directory; see docs/LOCAL-EU-KEYS.md"
+        ) from None
     except (OSError, ValueError):
         raise RegionKeysError(
             f"Cannot read valid JSON from {KEYS_FILENAME}"
